@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+.viewer-venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Tools
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.claude/
+
+# Output
+output/
+*.hdf5
+*.h5
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large files
+*.zip
+*.pdf
+ScienceDirect_articles_*
+WebPlotDigitizer_*

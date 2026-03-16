@@ -1,0 +1,65 @@
+# Case I: Cu/Ar HiPIMS — Gudmundsson 2022 Table 2 (0.54 Pa)
+base: base.yaml
+
+name: "hipims_cu_ar_case1"
+
+gas:
+  pressure_pa: 0.54       # 4 mTorr
+
+pulse:
+  voltage_v: 625.0
+  t_pulse_us: 40.0        # 40 us pulse
+  t_afterglow_us: 260.0   # Total period 300 us
+  waveform_file: "data/waveforms/cu_ar_case1_literature_fit.csv"
+
+numerics:
+  t_end: 300.0e-6
+
+case:
+  benchmark: "Gudmundsson 2022 Case I"
+  material_system: "Cu/Ar"
+  inputs:
+    - name: "case1_waveform"
+      kind: "waveform"
+      path: "data/waveforms/cu_ar_case1_literature_fit.csv"
+      provenance: "literature-fit"
+      citation: "Literature-shaped waveform for Gudmundsson Case I; not a raw measured trace."
+    - name: "gudmundsson_cu_ar_reactions"
+      kind: "reaction_set"
+      path: "data/reactions/gudmundsson_cu_ar.yaml"
+      provenance: "literature-fit"
+      citation: "Gudmundsson et al., Surf. Coat. Technol. 442 (2022) 128189."
+    - name: "yamamura_yields"
+      kind: "yield_model"
+      path: "data/sputtering/yamamura_yields.yaml"
+      provenance: "literature-fit"
+      citation: "Yamamura sputter-yield fit parameters."
+  notes: "Current trace and transport closures remain partly heuristic; treat results as exploratory."
+
+validation:
+  targets:
+    - name: "peak discharge current"
+      metric: "peak_current_a"
+      lower: 35.0
+      upper: 65.0
+      unit: "A"
+      citation: "Gudmundsson Case I reports peak current in the 40-60 A range."
+    - name: "current proxy rmse"
+      metric: "current_proxy_rmse_a"
+      upper: 15.0
+      unit: "A"
+      citation: "Calibration target against the literature-fit discharge current waveform."
+    - name: "current proxy peak ratio"
+      metric: "current_proxy_peak_ratio"
+      lower: 0.7
+      upper: 1.3
+      unit: "1"
+      citation: "Model current proxy peak should stay close to the literature-fit waveform peak."
+    - name: "current proxy peak timing"
+      metric: "current_proxy_peak_time_error_us"
+      upper: 25.0
+      unit: "us"
+      citation: "Proxy current peak should occur within the same pulse window as the literature-fit waveform."
+
+output:
+  dir: "output/global/hipims_cu_ar_case1"

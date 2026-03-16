@@ -1,0 +1,60 @@
+services:
+  plasma:
+    build: .
+    container_name: plasma-sim
+    runtime: nvidia
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HOME=/app/output/.runtime
+      - XDG_CONFIG_HOME=/app/output/.runtime/.config
+      - XDG_CACHE_HOME=/app/output/.runtime/.cache
+      - MPLCONFIGDIR=/app/output/.runtime/.config/matplotlib
+      - CUPY_CACHE_DIR=/app/output/.runtime/.cache/cupy
+      - NUMBA_CACHE_DIR=/app/output/.runtime/.cache/numba
+    volumes:
+      # Mount source for live development
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+      # Persist output data
+      - ./output:/app/output
+    working_dir: /app
+    stdin_open: true
+    tty: true
+
+    # Override for specific tasks:
+    #   docker compose run plasma python scripts/run_global_model.py
+    #   docker compose run plasma pytest
+    command: bash
+
+  # Jupyter notebook server for interactive work
+  jupyter:
+    build: .
+    container_name: plasma-jupyter
+    runtime: nvidia
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HOME=/app/output/.runtime
+      - XDG_CONFIG_HOME=/app/output/.runtime/.config
+      - XDG_CACHE_HOME=/app/output/.runtime/.cache
+      - MPLCONFIGDIR=/app/output/.runtime/.config/matplotlib
+      - CUPY_CACHE_DIR=/app/output/.runtime/.cache/cupy
+      - NUMBA_CACHE_DIR=/app/output/.runtime/.cache/numba
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
+      - ./output:/app/output
+    ports:
+      - "8888:8888"
+    command: >
+      bash -c "pip install -q jupyterlab &&
+               jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root"

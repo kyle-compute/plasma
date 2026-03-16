@@ -1,0 +1,55 @@
+[project]
+name = "plasma-sim"
+version = "0.1.0"
+description = "GPU-accelerated plasma simulation for HiPIMS sputtering"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "cupy-cuda12x>=13.0",
+    "numba>=0.59",
+    "pydantic>=2.5",
+    "pyyaml>=6.0",
+    "h5py>=3.10",
+    "matplotlib>=3.8",
+    "tornado>=6.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.98",
+    "ruff>=0.3",
+]
+cluster = [
+    "mpi4py>=3.1",
+]
+ml = [
+    "torch>=2.2",
+    "wandb>=0.16",
+]
+viz = [
+    "PySide6>=6.7",
+    "pyvista>=0.43",
+    "pyvistaqt>=0.11",
+    "pyqtgraph>=0.13",
+    "ipywidgets>=8.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plasma"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

@@ -1,0 +1,28 @@
+# Landau damping benchmark configuration
+# Validates PIC electrostatic solver against kinetic theory
+
+name: "landau_damping"
+model: "pic"
+
+# Physics
+plasma:
+  n0: 1.0e14          # Background density [m^-3]
+  te_ev: 10.0         # Electron temperature [eV]
+  alpha: 0.01         # Perturbation amplitude
+  k_mode: 1           # Perturbation wavenumber mode
+
+# Numerics
+grid:
+  nr: 4               # Nearly-1D (minimal radial cells)
+  nz: 64              # Axial resolution
+  # r_max and z_max computed from lambda_De
+
+particles:
+  ppc: 200            # Particles per cell
+
+time:
+  n_periods: 5.0      # Simulate for N plasma periods
+
+# Validation
+tolerance:
+  damping_rate_relative: 0.20   # Accept within 20% of theory

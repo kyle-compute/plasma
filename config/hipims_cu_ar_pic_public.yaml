@@ -1,0 +1,100 @@
+# HiPIMS PIC-MCC configuration: Cu target in Ar with public-download electron cross sections
+
+name: "hipims_cu_ar_pic_public"
+model: "pic"
+
+geometry:
+  r_target: 0.050
+  r_inner: 0.015
+  r_outer: 0.040
+  z_target: 0.0
+  z_substrate: 0.1
+  r_max: 0.06
+
+grid:
+  nr: 60
+  nz: 100
+  permittivity_factor: 10.0
+
+gas:
+  species: "Ar"
+  pressure_pa: 1.0
+  temperature_k: 300.0
+
+target:
+  material: "Cu"
+  cohesive_energy_ev: 3.49
+  sputter_yield_a: 0.1421
+  sputter_yield_b: 0.468
+  sputter_threshold_ev: 20.0
+  secondary_electron_yield: 0.1
+  see_energy_ev: 3.0
+
+pulse:
+  voltage_v: 625.0
+  t_pulse_us: 40.0
+  t_total_us: 300.0
+  rise_time_us: 0.1
+  waveform_file: "data/waveforms/cu_ar_case1_literature_fit.csv"
+
+particles:
+  ppc: 50
+  n0_electron: 1.0e+15
+  n0_ion: 1.0e+15
+  te_ev: 3.0
+  ti_ev: 0.1
+
+magnetic_field:
+  map_file: "data/field_maps/hipims_cu_ar_pic_surrogate.npz"
+  inner_magnet_r: 0.012
+  outer_magnet_r: 0.038
+  magnet_z: -0.005
+  current_inner: 1000.0
+  current_outer: -600.0
+
+cross_sections:
+  source: "normalized_files"
+  elastic_file: "data/cross_sections/lxcat_biagi_e_ar/electron_ar_elastic.tsv"
+  excitation_file: "data/cross_sections/lxcat_biagi_e_ar/electron_ar_excitation_total.tsv"
+  ionization_file: "data/cross_sections/lxcat_biagi_e_ar/electron_ar_ionization.tsv"
+  manifest_file: "data/cross_sections/lxcat_biagi_e_ar/manifest.json"
+
+time:
+  dt: 5.0e-12
+  n_steps: 10000
+  diag_interval: 100
+  compact_interval: 500
+  checkpoint_interval: 2000
+
+output:
+  dir: "output/pic/hipims_cu_ar_pic_public"
+
+case:
+  benchmark: "Public-data Cu/Ar PIC benchmark"
+  material_system: "Cu/Ar"
+  inputs:
+    - name: "gudmundsson_case1_waveform"
+      kind: "waveform"
+      path: "data/waveforms/cu_ar_case1_literature_fit.csv"
+      provenance: "literature-fit"
+      citation: "Literature-fit waveform derived from public Cu/Ar HiPIMS references."
+    - name: "biagi_e_ar_archive"
+      kind: "cross_sections"
+      path: "data/cross_sections/LXCat_Biagi_e_Ar.zip"
+      provenance: "public-download"
+      citation: "Biagi database, LXCat, retrieved March 16, 2026."
+    - name: "surrogate_magnetron_field"
+      kind: "magnetic_field"
+      path: "data/field_maps/hipims_cu_ar_pic_surrogate.npz"
+      provenance: "surrogate"
+      citation: "Field map generated from the analytic current-loop magnetron model."
+  notes: "Electron-Ar MCC comes from public LXCat data; waveform is literature-fit; magnetic field remains surrogate."
+
+validation:
+  targets:
+    - name: "peak target voltage"
+      metric: "peak_target_voltage_v"
+      lower: 580.0
+      upper: 650.0
+      unit: "V"
+      citation: "Sanity check for the public benchmark pulse amplitude."

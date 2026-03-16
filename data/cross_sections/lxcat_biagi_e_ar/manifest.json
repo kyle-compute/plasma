@@ -1,0 +1,74 @@
+{
+  "archive_path": "/home/tax/Desktop/plasma/data/cross_sections/LXCat_Biagi_e_Ar.zip",
+  "text_member": "Cross section.txt",
+  "generated_on": "16 Mar 2026. All rights reserved.",
+  "database": "Biagi (transcription of data from SF Biagi's Fortran code, Magboltz.)",
+  "permlink": "www.lxcat.net/Biagi",
+  "recommended_reference": "Biagi database, www.lxcat.net, retrieved on March 16, 2026.",
+  "normalized_files": [
+    {
+      "name": "electron_ar_elastic",
+      "process_names": [
+        "E + Ar -> E + Ar, Elastic"
+      ],
+      "output_path": "/home/tax/Desktop/plasma/data/cross_sections/lxcat_biagi_e_ar/electron_ar_elastic.tsv"
+    },
+    {
+      "name": "electron_ar_excitation_total",
+      "process_names": [
+        "E + Ar -> E + Ar(1S2), Excitation",
+        "E + Ar -> E + Ar(1S3), Excitation",
+        "E + Ar -> E + Ar(1S4), Excitation",
+        "E + Ar -> E + Ar(1S5), Excitation",
+        "E + Ar -> E + Ar(2P1), Excitation",
+        "E + Ar -> E + Ar(2P10), Excitation",
+        "E + Ar -> E + Ar(2P2), Excitation",
+        "E + Ar -> E + Ar(2P3), Excitation",
+        "E + Ar -> E + Ar(2P4), Excitation",
+        "E + Ar -> E + Ar(2P5), Excitation",
+        "E + Ar -> E + Ar(2P6), Excitation",
+        "E + Ar -> E + Ar(2P7), Excitation",
+        "E + Ar -> E + Ar(2P8), Excitation",
+        "E + Ar -> E + Ar(2P9), Excitation",
+        "E + Ar -> E + Ar(2S2), Excitation",
+        "E + Ar -> E + Ar(2S3), Excitation",
+        "E + Ar -> E + Ar(2S4), Excitation",
+        "E + Ar -> E + Ar(2S5), Excitation",
+        "E + Ar -> E + Ar(3D1!!), Excitation",
+        "E + Ar -> E + Ar(3D1!), Excitation",
+        "E + Ar -> E + Ar(3D2), Excitation",
+        "E + Ar -> E + Ar(3D3), Excitation",
+        "E + Ar -> E + Ar(3D4!), Excitation",
+        "E + Ar -> E + Ar(3D4), Excitation",
+        "E + Ar -> E + Ar(3D5), Excitation",
+        "E + Ar -> E + Ar(3D6), Excitation",
+        "E + Ar -> E + Ar(3S1!!!!), Excitation",
+        "E + Ar -> E + Ar(3S1!!!), Excitation",
+        "E + Ar -> E + Ar(3S1!!), Excitation",
+        "E + Ar -> E + Ar(3S1!), Excitation",
+        "E + Ar -> E + Ar(3S2), Excitation",
+        "E + Ar -> E + Ar(3S4), Excitation",
+        "E + Ar -> E + Ar(4D2), Excitation",
+        "E + Ar -> E + Ar(4D5), Excitation",
+        "E + Ar -> E + Ar(4S1!), Excitation",
+        "E + Ar -> E + Ar(4S2), Excitation",
+        "E + Ar -> E + Ar(4S4), Excitation",
+        "E + Ar -> E + Ar(5D2), Excitation",
+        "E + Ar -> E + Ar(5D5), Excitation",
+        "E + Ar -> E + Ar(5S1!), Excitation",
+        "E + Ar -> E + Ar(5S4), Excitation",
+        "E + Ar -> E + Ar(6D2), Excitation",
+        "E + Ar -> E + Ar(6D5), Excitation",
+        "E + Ar -> E + Ar(HIGH), Excitation"
+      ],
+      "output_path": "/home/tax/Desktop/plasma/data/cross_sections/lxcat_biagi_e_ar/electron_ar_excitation_total.tsv"
+    },
+    {
+      "name": "electron_ar_ionization",
+      "process_names": [
+        "E + Ar -> E + E + Ar+, Ionization"
+      ],
+      "output_path": "/home/tax/Desktop/plasma/data/cross_sections/lxcat_biagi_e_ar/electron_ar_ionization.tsv"
+    }
+  ]
+}

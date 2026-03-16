@@ -1,0 +1,15 @@
+# Ti/Ar HiPIMS — placeholder for future implementation
+base: base.yaml
+
+name: "hipims_ti_ar"
+
+target:
+  material: "Ti"
+  cohesive_energy_ev: 4.89
+  sputter_yield_a: 0.0813
+  sputter_yield_b: 0.474
+  self_sputter_yield_a: 0.0450
+  self_sputter_yield_b: 0.520
+  secondary_electron_yield: 0.12
+
+reactions_file: "data/reactions/gudmundsson_ti_ar.yaml"

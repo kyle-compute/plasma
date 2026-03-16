@@ -1,0 +1,40 @@
+# Base configuration — shared defaults for all HiPIMS simulations
+
+name: "base"
+model: "global"
+
+geometry:
+  r_target: 0.050        # 100 mm diameter target
+  r_inner: 0.015         # Inner race-track radius [m]
+  r_outer: 0.040         # Outer race-track radius [m]
+  z_ir: 0.020            # Ionization region height [m]
+
+gas:
+  species: "Ar"
+  pressure_pa: 1.0       # 1 Pa ≈ 7.5 mTorr
+  temperature_k: 300.0
+
+target:
+  material: "Cu"
+  cohesive_energy_ev: 3.49
+  sputter_yield_a: 0.1421
+  sputter_yield_b: 0.468
+  self_sputter_yield_a: 0.0691
+  self_sputter_yield_b: 0.556
+  secondary_electron_yield: 0.1
+
+pulse:
+  voltage_v: 600.0
+  t_pulse_us: 100.0
+  t_afterglow_us: 200.0
+
+numerics:
+  t_start: 0.0
+  t_end: 300.0e-6        # 300 us (pulse + afterglow)
+  dt_max: 1.0e-8
+  rtol: 1.0e-6
+  atol: 1.0e-10
+  solver: "BDF"
+
+reactions_file: "data/reactions/gudmundsson_cu_ar.yaml"
+cross_sections_dir: "data/cross_sections"

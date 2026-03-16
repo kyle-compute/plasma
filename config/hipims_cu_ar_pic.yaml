@@ -1,0 +1,89 @@
+# HiPIMS PIC-MCC configuration: Cu target in Ar
+# Uses synthetic cross-sections (no external data files required)
+
+name: "hipims_cu_ar_pic"
+model: "pic"
+
+geometry:
+  r_target: 0.050        # 100 mm diameter target
+  r_inner: 0.015         # Inner erosion zone [m]
+  r_outer: 0.040         # Outer erosion zone [m]
+  z_target: 0.0          # Target at z=0
+  z_substrate: 0.1       # Substrate at z=0.1 m
+  r_max: 0.06            # Domain outer radius [m]
+
+grid:
+  nr: 60
+  nz: 100
+  permittivity_factor: 10.0   # Relaxes Debye length constraint
+
+gas:
+  species: "Ar"
+  pressure_pa: 1.0       # ~7.5 mTorr
+  temperature_k: 300.0
+
+target:
+  material: "Cu"
+  cohesive_energy_ev: 3.49
+  sputter_yield_a: 0.1421
+  sputter_yield_b: 0.468
+  sputter_threshold_ev: 20.0
+  secondary_electron_yield: 0.1
+  see_energy_ev: 3.0
+
+pulse:
+  voltage_v: 600.0
+  t_pulse_us: 100.0
+  t_total_us: 300.0
+  rise_time_us: 0.1
+
+particles:
+  ppc: 50                # Particles per cell
+  n0_electron: 1.0e+15   # Initial electron density [m^-3]
+  n0_ion: 1.0e+15        # Initial ion density [m^-3]
+  te_ev: 3.0             # Initial electron temperature [eV]
+  ti_ev: 0.1             # Initial ion temperature [eV]
+
+magnetic_field:
+  inner_magnet_r: 0.012
+  outer_magnet_r: 0.038
+  magnet_z: -0.005
+  current_inner: 1000.0
+  current_outer: -600.0
+
+time:
+  dt: 5.0e-12            # Timestep [s]
+  n_steps: 10000         # Total steps
+  diag_interval: 100
+  compact_interval: 500
+  checkpoint_interval: 2000
+
+output:
+  dir: "output/pic/hipims_cu_ar_pic"
+
+case:
+  benchmark: "Synthetic Cu/Ar PIC smoke case"
+  material_system: "Cu/Ar"
+  inputs:
+    - name: "synthetic_square_pulse"
+      kind: "waveform"
+      provenance: "synthetic"
+      citation: "Programmatic square pulse used for development runs."
+    - name: "synthetic_argon_cross_sections"
+      kind: "cross_sections"
+      provenance: "synthetic"
+      citation: "Synthetic MCC cross sections bundled in source code."
+    - name: "analytic_magnetron_field"
+      kind: "magnetic_field"
+      provenance: "heuristic"
+      citation: "Analytic coil field used in place of a measured field map."
+  notes: "Useful for integration testing and workflow development, not predictive validation."
+
+validation:
+  targets:
+    - name: "peak target voltage"
+      metric: "peak_target_voltage_v"
+      lower: 550.0
+      upper: 650.0
+      unit: "V"
+      citation: "Sanity check for the configured synthetic pulse amplitude."

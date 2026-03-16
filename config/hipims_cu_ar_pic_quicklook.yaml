@@ -1,0 +1,47 @@
+# Fast interactive PIC case for live viewing and smoke tests.
+base: hipims_cu_ar_pic_public.yaml
+
+name: "hipims_cu_ar_pic_quicklook"
+
+grid:
+  nr: 24
+  nz: 40
+  permittivity_factor: 10.0
+
+particles:
+  ppc: 8
+  n0_electron: 5.0e+14
+  n0_ion: 5.0e+14
+  te_ev: 3.0
+  ti_ev: 0.1
+
+magnetic_field:
+  map_file: null
+  inner_magnet_r: 0.012
+  outer_magnet_r: 0.038
+  magnet_z: -0.005
+  current_inner: 1000.0
+  current_outer: -600.0
+
+time:
+  dt: 5.0e-12
+  n_steps: 1200
+  diag_interval: 20
+  compact_interval: 100
+  checkpoint_interval: 0
+
+output:
+  dir: "output/pic/hipims_cu_ar_pic_quicklook"
+
+case:
+  benchmark: "Interactive Cu/Ar PIC quicklook"
+  material_system: "Cu/Ar"
+  inputs:
+    - name: "gudmundsson_case1_waveform"
+      kind: "waveform"
+      path: "data/waveforms/cu_ar_case1_literature_fit.csv"
+      provenance: "literature-fit"
+      citation: "Literature-fit waveform reused for the quicklook case."
+  notes: "Reduced grid and particle count for live interaction; not a validation-grade benchmark."
+
+validation: null

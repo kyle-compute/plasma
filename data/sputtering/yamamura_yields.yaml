@@ -1,0 +1,36 @@
+# Sputter yield fits: Y(E) = a * E^b
+# Source: Yamamura & Tawara, At. Data Nucl. Data Tables 62 (1996) 149
+# E in eV, Y dimensionless (atoms/ion)
+
+yields:
+  Ar_Cu:
+    ion: "Ar+"
+    target: "Cu"
+    a: 0.1421
+    b: 0.468
+    threshold_ev: 17.0   # Approximate sputter threshold
+    cohesive_energy_ev: 3.49
+
+  Cu_Cu:
+    ion: "Cu+"
+    target: "Cu"
+    a: 0.0691
+    b: 0.556
+    threshold_ev: 15.0
+    cohesive_energy_ev: 3.49
+
+  Ar_Ti:
+    ion: "Ar+"
+    target: "Ti"
+    a: 0.0813
+    b: 0.474
+    threshold_ev: 20.0
+    cohesive_energy_ev: 4.89
+
+  Ti_Ti:
+    ion: "Ti+"
+    target: "Ti"
+    a: 0.0450
+    b: 0.520
+    threshold_ev: 18.0
+    cohesive_energy_ev: 4.89

@@ -1,0 +1,389 @@
+# Rate coefficients for Cu/Ar HiPIMS discharge
+# Source: Gudmundsson et al., Surf. Coat. Technol. 442 (2022) 128189, Table 1
+#
+# Rate coefficients k(T_e) in m^3/s, T_e in eV.
+# Format: k = a * T_e^b * exp(-c / T_e) or piecewise fits.
+# "cold" electron range: 1-7 eV, "hot" range: 200-1000 eV.
+#
+# Notation:
+#   reactants/products use species symbols from species.py
+#   threshold_ev: energy threshold for the reaction
+#   type: ionization | excitation | deexcitation | decay | charge_exchange | penning
+
+reactions:
+  # ══════════════════════════════════════════════════════════════════
+  # Electron-Argon reactions (R1-R9)
+  # ══════════════════════════════════════════════════════════════════
+
+  R1:
+    name: "Ar ground state ionization"
+    reactants: ["e", "Ar_c"]
+    products: ["Ar+", "e", "e"]
+    type: ionization
+    threshold_ev: 15.76
+    rate_cold:
+      # k = 2.34e-14 * Te^0.59 * exp(-17.44/Te) [m^3/s]
+      a: 2.34e-14
+      b: 0.59
+      c: 17.44
+    rate_hot:
+      a: 1.0e-13
+      b: 0.0
+      c: 15.76
+
+  R2:
+    name: "Ar excitation to metastable"
+    reactants: ["e", "Ar_c"]
+    products: ["Ar_m", "e"]
+    type: excitation
+    threshold_ev: 11.55
+    rate_cold:
+      a: 5.0e-15
+      b: 0.74
+      c: 11.56
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R3:
+    name: "Ar excitation to resonant"
+    reactants: ["e", "Ar_c"]
+    products: ["Ar_r", "e"]
+    type: excitation
+    threshold_ev: 11.72
+    rate_cold:
+      a: 1.0e-15
+      b: 0.51
+      c: 12.64
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R4:
+    name: "Ar metastable de-excitation"
+    reactants: ["e", "Ar_m"]
+    products: ["Ar_c", "e"]
+    type: deexcitation
+    threshold_ev: 0.0
+    rate_cold:
+      # Detailed balance with R2
+      a: 4.3e-16
+      b: 0.74
+      c: 0.0
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R5:
+    name: "Ar resonant de-excitation"
+    reactants: ["e", "Ar_r"]
+    products: ["Ar_c", "e"]
+    type: deexcitation
+    threshold_ev: 0.0
+    rate_cold:
+      a: 8.9e-17
+      b: 0.51
+      c: 0.0
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R6:
+    name: "Ar resonant stepwise ionization"
+    reactants: ["e", "Ar_r"]
+    products: ["Ar+", "e", "e"]
+    type: ionization
+    threshold_ev: 4.21
+    rate_cold:
+      a: 6.8e-15
+      b: 0.67
+      c: 4.20
+    rate_hot:
+      a: 5.0e-14
+      b: 0.0
+      c: 4.21
+
+  R7:
+    name: "Ar metastable stepwise ionization"
+    reactants: ["e", "Ar_m"]
+    products: ["Ar+", "e", "e"]
+    type: ionization
+    threshold_ev: 4.21
+    rate_cold:
+      a: 6.8e-15
+      b: 0.67
+      c: 4.20
+    rate_hot:
+      a: 5.0e-14
+      b: 0.0
+      c: 4.21
+
+  R8:
+    name: "Ar+ double ionization"
+    reactants: ["e", "Ar+"]
+    products: ["Ar2+", "e", "e"]
+    type: ionization
+    threshold_ev: 27.63
+    rate_cold:
+      a: 1.0e-14
+      b: 0.50
+      c: 27.63
+    rate_hot:
+      a: 5.0e-14
+      b: 0.0
+      c: 27.63
+
+  R9:
+    name: "Ar direct double ionization"
+    reactants: ["e", "Ar_c"]
+    products: ["Ar2+", "e", "e", "e"]
+    type: ionization
+    threshold_ev: 43.39
+    rate_cold:
+      a: 1.0e-16
+      b: 0.50
+      c: 43.39
+    rate_hot:
+      a: 5.0e-15
+      b: 0.0
+      c: 43.39
+
+  # ══════════════════════════════════════════════════════════════════
+  # Electron-Copper reactions (R10-R24)
+  # ══════════════════════════════════════════════════════════════════
+
+  R10:
+    name: "Cu excitation to metastable 1"
+    reactants: ["e", "Cu"]
+    products: ["Cu_m1", "e"]
+    type: excitation
+    threshold_ev: 1.389
+    rate_cold:
+      a: 3.0e-13
+      b: -0.20
+      c: 1.84
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R11:
+    name: "Cu excitation to metastable 2"
+    reactants: ["e", "Cu"]
+    products: ["Cu_m2", "e"]
+    type: excitation
+    threshold_ev: 1.642
+    rate_cold:
+      a: 2.5e-13
+      b: -0.20
+      c: 2.17
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R12:
+    name: "Cu excitation to excited"
+    reactants: ["e", "Cu"]
+    products: ["Cu_ex", "e"]
+    type: excitation
+    threshold_ev: 3.786
+    rate_cold:
+      a: 2.0e-13
+      b: 0.10
+      c: 4.23
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R13:
+    name: "Cu metastable 1 to excited"
+    reactants: ["e", "Cu_m1"]
+    products: ["Cu_ex", "e"]
+    type: excitation
+    threshold_ev: 2.397
+    rate_cold:
+      a: 5.0e-13
+      b: 0.10
+      c: 2.80
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R14:
+    name: "Cu excited radiative decay to ground"
+    reactants: ["Cu_ex"]
+    products: ["Cu"]
+    type: decay
+    threshold_ev: 0.0
+    rate_constant: 3.0e7  # [1/s] — inverse radiative lifetime
+
+  R15:
+    name: "Cu excited radiative decay to metastable 1"
+    reactants: ["Cu_ex"]
+    products: ["Cu_m1"]
+    type: decay
+    threshold_ev: 0.0
+    rate_constant: 5.0e6  # [1/s]
+
+  R16:
+    name: "Cu excited radiative decay to metastable 2"
+    reactants: ["Cu_ex"]
+    products: ["Cu_m2"]
+    type: decay
+    threshold_ev: 0.0
+    rate_constant: 5.0e6  # [1/s]
+
+  R17:
+    name: "Cu metastable 1 to metastable 2 (electron)"
+    reactants: ["e", "Cu_m1"]
+    products: ["Cu_m2", "e"]
+    type: excitation
+    threshold_ev: 0.253
+    rate_cold:
+      a: 8.0e-13
+      b: -0.30
+      c: 0.35
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R18:
+    name: "Cu metastable 2 to metastable 1 (electron)"
+    reactants: ["e", "Cu_m2"]
+    products: ["Cu_m1", "e"]
+    type: deexcitation
+    threshold_ev: 0.0
+    rate_cold:
+      a: 6.0e-13
+      b: -0.30
+      c: 0.0
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R19:
+    name: "Cu metastable 2 to excited (electron)"
+    reactants: ["e", "Cu_m2"]
+    products: ["Cu_ex", "e"]
+    type: excitation
+    threshold_ev: 2.144
+    rate_cold:
+      a: 5.0e-13
+      b: 0.10
+      c: 2.50
+    rate_hot:
+      a: 0.0
+      b: 0.0
+      c: 0.0
+
+  R20:
+    name: "Cu ground state ionization"
+    reactants: ["e", "Cu"]
+    products: ["Cu+", "e", "e"]
+    type: ionization
+    threshold_ev: 7.726
+    rate_cold:
+      a: 5.0e-14
+      b: 0.53
+      c: 8.77
+    rate_hot:
+      a: 3.0e-13
+      b: 0.0
+      c: 7.73
+
+  R21:
+    name: "Cu metastable 1 ionization"
+    reactants: ["e", "Cu_m1"]
+    products: ["Cu+", "e", "e"]
+    type: ionization
+    threshold_ev: 6.337
+    rate_cold:
+      a: 1.0e-13
+      b: 0.47
+      c: 7.20
+    rate_hot:
+      a: 5.0e-13
+      b: 0.0
+      c: 6.34
+
+  R22:
+    name: "Cu metastable 2 ionization"
+    reactants: ["e", "Cu_m2"]
+    products: ["Cu+", "e", "e"]
+    type: ionization
+    threshold_ev: 6.084
+    rate_cold:
+      a: 1.2e-13
+      b: 0.47
+      c: 6.90
+    rate_hot:
+      a: 5.5e-13
+      b: 0.0
+      c: 6.08
+
+  R23:
+    name: "Cu excited state ionization"
+    reactants: ["e", "Cu_ex"]
+    products: ["Cu+", "e", "e"]
+    type: ionization
+    threshold_ev: 3.940
+    rate_cold:
+      a: 3.5e-13
+      b: 0.30
+      c: 4.50
+    rate_hot:
+      a: 1.0e-12
+      b: 0.0
+      c: 3.94
+
+  R24:
+    name: "Cu+ double ionization"
+    reactants: ["e", "Cu+"]
+    products: ["Cu2+", "e", "e"]
+    type: ionization
+    threshold_ev: 20.29
+    rate_cold:
+      a: 3.0e-14
+      b: 0.50
+      c: 20.29
+    rate_hot:
+      a: 1.0e-13
+      b: 0.0
+      c: 20.29
+
+  # ══════════════════════════════════════════════════════════════════
+  # Heavy particle reactions (R25-R27)
+  # ══════════════════════════════════════════════════════════════════
+
+  R25:
+    name: "Ar+ - Cu charge exchange"
+    reactants: ["Ar+", "Cu"]
+    products: ["Ar_c", "Cu+"]
+    type: charge_exchange
+    threshold_ev: 0.0
+    rate_constant: 1.0e-15  # [m^3/s] approximately constant
+
+  R26:
+    name: "Ar metastable - Cu Penning ionization"
+    reactants: ["Ar_m", "Cu"]
+    products: ["Ar_c", "Cu+", "e"]
+    type: penning
+    threshold_ev: 0.0
+    rate_constant: 5.0e-16  # [m^3/s]
+
+  R27:
+    name: "Ar resonant - Cu Penning ionization"
+    reactants: ["Ar_r", "Cu"]
+    products: ["Ar_c", "Cu+", "e"]
+    type: penning
+    threshold_ev: 0.0
+    rate_constant: 5.0e-16  # [m^3/s]
