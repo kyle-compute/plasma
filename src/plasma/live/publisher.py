@@ -33,6 +33,12 @@ class FileLiveSession:
             return None
         return LiveSnapshot.model_validate_json(self.snapshot_path.read_text())
 
+    def clear_stale_commands(self) -> None:
+        """Remove any leftover command file from a previous run."""
+        if self.command_path.exists():
+            self.command_path.unlink(missing_ok=True)
+        self._last_command_seq = 0
+
     def send_command(self, command: str) -> LiveCommand:
         """Write a new control command for the simulation."""
         seq = self._next_command_seq()

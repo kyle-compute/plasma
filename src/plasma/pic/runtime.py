@@ -71,6 +71,8 @@ def run_pic_case(
     target_dir = Path(output_dir or cfg.output.dir)
     target_dir.mkdir(parents=True, exist_ok=True)
     live_session = FileLiveSession(live_dir) if live_dir else None
+    if live_session is not None:
+        live_session.clear_stale_commands()
     diagnostics_h5_path = target_dir / "diagnostics_snapshots.h5"
     metal_species_name = cfg.target.material
 
@@ -124,6 +126,8 @@ def run_pic_case(
             sim.get("mcc_handlers"),
         )
         merge_event_clouds(live_event_window, stats.get("event_clouds"))
+        if live_session is not None and step % 50 == 0:
+            _handle_live_commands(live_session, control_state)
         if step % cfg.time.diag_interval != 0:
             return
         for species_name, incident in stats.get("substrate_incident", {}).items():
@@ -207,7 +211,6 @@ def run_pic_case(
         live_history["racetrack_peak_r_m"].append(float(snapshot.metrics.get("racetrack_peak_r_m", 0.0)))
         if live_session is not None:
             live_session.publish(snapshot)
-            _handle_live_commands(live_session, control_state)
         _save_hdf5_snapshot(
             diagnostics_h5_path,
             step,
@@ -418,8 +421,21 @@ def _build_waveform(cfg: PICConfig):
 def _build_magnetic_field(grid, cfg: PICConfig) -> tuple:
     if cfg.magnetic_field.map_file:
         br_grid, bz_grid = load_magnetic_field_map(cfg.magnetic_field.map_file)
-        validate_field_map_shape(br_grid, bz_grid, n_r=grid.n_nodes_r, n_z=grid.n_nodes_z)
-        return br_grid, bz_grid
+        expected = (grid.n_nodes_r, grid.n_nodes_z)
+        if br_grid.shape == expected:
+            return br_grid, bz_grid
+        # Field map shape mismatch — interpolate to current grid
+        from scipy.interpolate import RegularGridInterpolator
+        old_nr, old_nz = br_grid.shape
+        old_r = np.linspace(0, grid.r_max, old_nr)
+        old_z = np.linspace(0, grid.z_max, old_nz)
+        new_r = np.linspace(0, grid.r_max, grid.n_nodes_r)
+        new_z = np.linspace(0, grid.z_max, grid.n_nodes_z)
+        rr, zz = np.meshgrid(new_r, new_z, indexing="ij")
+        pts = np.column_stack([rr.ravel(), zz.ravel()])
+        br_interp = RegularGridInterpolator((old_r, old_z), br_grid, bounds_error=False, fill_value=0.0)
+        bz_interp = RegularGridInterpolator((old_r, old_z), bz_grid, bounds_error=False, fill_value=0.0)
+        return br_interp(pts).reshape(expected), bz_interp(pts).reshape(expected)
     return magnetron_field(
         grid,
         inner_loop_r=cfg.magnetic_field.inner_magnet_r,
@@ -788,7 +804,11 @@ def _handle_live_commands(session: FileLiveSession, state: dict[str, int | bool]
             state["step_budget"] = 1
 
     while state["paused"]:
-        sleep(0.05)
+        try:
+            sleep(0.05)
+        except KeyboardInterrupt:
+            state["paused"] = False
+            raise
         command = session.poll_command()
         if command is None:
             continue

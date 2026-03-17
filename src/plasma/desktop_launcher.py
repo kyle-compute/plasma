@@ -184,6 +184,9 @@ class PlasmaDesktopWindow(QtWidgets.QMainWindow):
             return
         self.status_label.setText("Stopping run...")
         self.run_process.terminate()
+        if not self.run_process.waitForFinished(3000):
+            self.run_process.kill()
+            self.run_process.waitForFinished(2000)
 
 
 def main() -> int:
