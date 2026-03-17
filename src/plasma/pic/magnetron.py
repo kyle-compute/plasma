@@ -97,9 +97,9 @@ def process_target_impacts(
     2. Generate secondary electrons (constant Bernoulli yield).
     3. Generate sputtered neutral atoms (energy-only Y(E), cosine emission).
 
-    This function re-detects hits from particle arrays rather than consuming
-    the hit_target_flags returned by apply_magnetron_boundaries.  It should
-    be called *before* the boundary kernel kills the particles (or on a copy).
+    GPU pre-filter: hit detection runs on GPU to avoid transferring all
+    particle data.  Only the compact subset of hitting particles is
+    transferred to CPU for the surface physics calculations.
 
     Args:
         target: Magnetron target configuration.
@@ -117,29 +117,32 @@ def process_target_impacts(
     if n == 0:
         return {"see_electrons": None, "sputtered_neutrals": None, "impact_positions": None, "n_impacts": 0}
 
-    # Find ions that are at or below the target surface
-    z_cpu = cp.asnumpy(ion_particles.z[:n])
-    alive_cpu = cp.asnumpy(ion_particles.alive[:n])
-    r_cpu = cp.asnumpy(ion_particles.r[:n])
-    vr_cpu = cp.asnumpy(ion_particles.vr[:n])
-    vz_cpu = cp.asnumpy(ion_particles.vz[:n])
-    vt_cpu = cp.asnumpy(ion_particles.vtheta[:n])
-    w_cpu = cp.asnumpy(ion_particles.weight[:n])
+    # GPU pre-filter: find hits on device to avoid full-array transfer
+    z_gpu = ion_particles.z[:n]
+    alive_gpu = ion_particles.alive[:n]
+    r_gpu = ion_particles.r[:n]
 
-    # Mask: alive, at target (z <= z_target), and within erosion zone
-    hit_mask = (
-        (alive_cpu == 1)
-        & (z_cpu <= target.z_target)
-        & target.is_on_target_array(r_cpu)
+    hit_mask_gpu = (
+        (alive_gpu == 1)
+        & (z_gpu <= target.z_target)
+        & (r_gpu >= target.r_inner)
+        & (r_gpu <= target.r_outer)
     )
-    hit_idx = np.where(hit_mask)[0]
-    n_hits = len(hit_idx)
+    hit_idx_gpu = cp.where(hit_mask_gpu)[0]
+    n_hits = len(hit_idx_gpu)
 
     if n_hits == 0:
         return {"see_electrons": None, "sputtered_neutrals": None, "impact_positions": None, "n_impacts": 0}
 
-    # Impact energies [eV] from kinetic energy
-    v2 = vr_cpu[hit_idx]**2 + vz_cpu[hit_idx]**2 + vt_cpu[hit_idx]**2
+    # Transfer only the compact hit subset to CPU
+    r_cpu = cp.asnumpy(r_gpu[hit_idx_gpu])
+    vr_cpu = cp.asnumpy(ion_particles.vr[:n][hit_idx_gpu])
+    vz_cpu = cp.asnumpy(ion_particles.vz[:n][hit_idx_gpu])
+    vt_cpu = cp.asnumpy(ion_particles.vtheta[:n][hit_idx_gpu])
+    w_cpu = cp.asnumpy(ion_particles.weight[:n][hit_idx_gpu])
+
+    # Impact energies [eV] from kinetic energy (compact arrays — already hit subset)
+    v2 = vr_cpu**2 + vz_cpu**2 + vt_cpu**2
     impact_energy_ev = 0.5 * ion_particles.species.mass * v2 / E_CHARGE
 
     if rng is None:
@@ -151,19 +154,16 @@ def process_target_impacts(
     # --- Secondary Electron Emission ---
     see_data = None
     if see_yield > 0:
-        # Probabilistic SEE: each impact has probability = yield
-        # For yield < 1, each ion randomly emits 0 or 1 electron
         see_rand = uniform_cpu(rng, n_hits)
         see_mask = see_rand < see_yield
         n_see = int(np.sum(see_mask))
 
         if n_see > 0:
-            see_r = r_cpu[hit_idx][see_mask]
-            see_z = np.full(n_see, target.z_target + 1e-6)  # Just above target
+            see_r = r_cpu[see_mask]
+            see_z = np.full(n_see, target.z_target + 1e-6)
 
-            # SEE electrons emitted with low energy, random direction into half-space
             v_see = np.sqrt(2.0 * target.see_energy_ev * E_CHARGE / 9.109e-31)
-            cos_theta = uniform_cpu(rng, n_see)  # Half-space: cos(theta) in [0, 1]
+            cos_theta = uniform_cpu(rng, n_see)
             sin_theta = np.sqrt(1.0 - cos_theta**2)
             phi = 2.0 * np.pi * uniform_cpu(rng, n_see)
 
@@ -171,18 +171,16 @@ def process_target_impacts(
                 "r": see_r,
                 "z": see_z,
                 "vr": v_see * sin_theta * np.cos(phi),
-                "vz": v_see * cos_theta,  # Away from target (+z)
+                "vz": v_see * cos_theta,
                 "vtheta": v_see * sin_theta * np.sin(phi),
-                "weight": w_cpu[hit_idx][see_mask],
+                "weight": w_cpu[see_mask],
             }
 
     # --- Sputtering ---
     sputter_data = None
     if sputter_yield is not None:
-        # Compute yield for each impact energy
         yields = sputter_yield(impact_energy_ev)
 
-        # Probabilistic: each impact creates floor(Y) + maybe 1 more atom
         n_sputtered_per_ion = np.floor(yields).astype(int)
         frac = yields - n_sputtered_per_ion
         extra = (uniform_cpu(rng, n_hits) < frac).astype(int)
@@ -191,7 +189,6 @@ def process_target_impacts(
         total_sputtered = int(np.sum(n_sputtered_per_ion))
 
         if total_sputtered > 0:
-            # Allocate arrays for sputtered atoms
             sp_r = np.empty(total_sputtered)
             sp_z = np.empty(total_sputtered)
             sp_vr = np.empty(total_sputtered)
@@ -205,31 +202,25 @@ def process_target_impacts(
                 if ns == 0:
                     continue
 
-                # Position: at target surface, same r as impact
-                sp_r[idx:idx + ns] = r_cpu[hit_idx[i]]
+                sp_r[idx:idx + ns] = r_cpu[i]
                 sp_z[idx:idx + ns] = target.z_target + 1e-6
 
-                # Thompson energy distribution: f(E) ∝ E / (E + E_b)^3
-                # where E_b = surface binding energy
-                # Sample using inverse CDF
                 e_b = target.surface_binding_ev
                 u = uniform_cpu(rng, ns)
-                # Approximate: E = E_b * u / (1 - u) capped at impact energy
                 sp_energy = e_b * u / (1.0 - u + 1e-10)
                 sp_energy = np.minimum(sp_energy, impact_energy_ev[i])
                 sp_energy = np.maximum(sp_energy, 0.01)
 
                 sp_speed = np.sqrt(2.0 * sp_energy * E_CHARGE / target.material_mass)
 
-                # Cosine distribution into half-space (away from target)
-                cos_theta = np.sqrt(uniform_cpu(rng, ns))  # cos-weighted
+                cos_theta = np.sqrt(uniform_cpu(rng, ns))
                 sin_theta = np.sqrt(1.0 - cos_theta**2)
                 phi = 2.0 * np.pi * uniform_cpu(rng, ns)
 
                 sp_vr[idx:idx + ns] = sp_speed * sin_theta * np.cos(phi)
-                sp_vz[idx:idx + ns] = sp_speed * cos_theta  # +z away from target
+                sp_vz[idx:idx + ns] = sp_speed * cos_theta
                 sp_vt[idx:idx + ns] = sp_speed * sin_theta * np.sin(phi)
-                sp_w[idx:idx + ns] = w_cpu[hit_idx[i]]
+                sp_w[idx:idx + ns] = w_cpu[i]
 
                 idx += ns
 
@@ -246,7 +237,7 @@ def process_target_impacts(
         "see_electrons": see_data,
         "sputtered_neutrals": sputter_data,
         "impact_positions": {
-            "r": r_cpu[hit_idx].copy(),
+            "r": r_cpu.copy(),
             "z": np.full(n_hits, target.z_target, dtype=np.float64),
         },
         "n_impacts": n_hits,

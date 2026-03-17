@@ -28,14 +28,21 @@ import numpy as np
 from scipy.sparse import csr_matrix, lil_matrix
 
 from plasma.core.constants import EPSILON_0
-from plasma.runtime.cupy_compat import cp, gpu_csr_matrix, gpu_spsolve
+from plasma.runtime.cupy_compat import (
+    GpuLinearOperator,
+    cp,
+    gpu_cg,
+    gpu_csr_matrix,
+    gpu_spsolve,
+)
 
 
 class PoissonSolverCylindrical:
     """Finite-difference Poisson solver on a cylindrical (r, z) grid.
 
     Pre-computes the sparse coefficient matrix on construction so that
-    each solve only requires a sparse LU back-substitution.
+    each solve only requires a sparse LU back-substitution (direct mode)
+    or a preconditioned CG iteration (iterative mode).
 
     Usage:
         solver = PoissonSolverCylindrical(grid, bc_r_max="dirichlet")
@@ -50,6 +57,9 @@ class PoissonSolverCylindrical:
         bc_z_min: str = "dirichlet",
         bc_z_max: str = "dirichlet",
         permittivity_factor: float = 1.0,
+        iterative: bool = True,
+        iterative_tol: float = 1e-8,
+        iterative_maxiter: int = 2000,
     ):
         """Initialize solver and build coefficient matrix.
 
@@ -59,6 +69,9 @@ class PoissonSolverCylindrical:
             bc_z_min: "dirichlet" or "neumann" at z=0.
             bc_z_max: "dirichlet" or "neumann" at z=L.
             permittivity_factor: Artificial permittivity kappa (>1 inflates Debye length).
+            iterative: Use CG iterative solver instead of direct sparse solve.
+            iterative_tol: Convergence tolerance for iterative solver.
+            iterative_maxiter: Maximum CG iterations.
         """
         self.grid = grid
         self.nr = grid.nr
@@ -76,6 +89,12 @@ class PoissonSolverCylindrical:
         self.n_z = grid.n_nodes_z
         self.n_total = self.n_r * self.n_z
 
+        # Iterative solver settings
+        self._use_iterative = iterative
+        self._tol = iterative_tol
+        self._max_iter = iterative_maxiter
+        self._prev_phi: cp.ndarray | None = None
+
         # Build and cache sparse matrix
         self._build_matrix()
 
@@ -87,6 +106,7 @@ class PoissonSolverCylindrical:
         """Build the sparse coefficient matrix for the Poisson equation.
 
         Uses a 5-point stencil in cylindrical coordinates.
+        Also precomputes vectorised BC index arrays and Jacobi preconditioner.
         """
         n = self.n_total
         A = lil_matrix((n, n), dtype=np.float64)
@@ -98,6 +118,11 @@ class PoissonSolverCylindrical:
 
         # Interior mask: which nodes are Dirichlet boundary
         self._is_bc = np.zeros(n, dtype=bool)
+
+        # Collect BC indices for vectorised application in solve()
+        bc_r_max_list: list[int] = []
+        bc_z0_list: list[int] = []
+        bc_zL_list: list[int] = []
 
         for i in range(self.n_r):
             r_i = self.grid.r_edges[i]
@@ -113,18 +138,21 @@ class PoissonSolverCylindrical:
                     A[k, k] = 1.0
                     self._is_bc[k] = True
                     is_boundary = True
+                    bc_r_max_list.append(k)
 
                 # z = 0 boundary
                 if j == 0 and not is_boundary and self.bc_z_min == "dirichlet":
                     A[k, k] = 1.0
                     self._is_bc[k] = True
                     is_boundary = True
+                    bc_z0_list.append(k)
 
                 # z = L boundary
                 if j == self.n_z - 1 and not is_boundary and self.bc_z_max == "dirichlet":
                     A[k, k] = 1.0
                     self._is_bc[k] = True
                     is_boundary = True
+                    bc_zL_list.append(k)
 
                 if is_boundary:
                     continue
@@ -168,6 +196,33 @@ class PoissonSolverCylindrical:
         A_csr = csr_matrix(A)
         self._A_gpu = gpu_csr_matrix(A_csr)
 
+        # Precompute GPU index arrays for vectorised BC application
+        self._bc_r_max_idx = cp.asarray(np.array(bc_r_max_list, dtype=np.int64)) if bc_r_max_list else None
+        self._bc_z0_idx = cp.asarray(np.array(bc_z0_list, dtype=np.int64)) if bc_z0_list else None
+        self._bc_zL_idx = cp.asarray(np.array(bc_zL_list, dtype=np.int64)) if bc_zL_list else None
+
+        # Build Jacobi preconditioner for iterative solver.
+        # The Poisson matrix A is negative-definite; CG requires SPD so we
+        # solve (-A)x = -b.  The preconditioner is M = diag(-A).
+        if self._use_iterative:
+            diag = np.asarray(A_csr.diagonal(), dtype=np.float64)
+            neg_diag = -diag
+            neg_diag[neg_diag == 0] = 1.0
+            inv_neg_diag = 1.0 / neg_diag
+            self._jacobi_inv = cp.asarray(inv_neg_diag)
+
+            def _jacobi_matvec(x: cp.ndarray) -> cp.ndarray:
+                return self._jacobi_inv * x
+
+            self._preconditioner = GpuLinearOperator(
+                (self.n_total, self.n_total),
+                matvec=_jacobi_matvec,
+                dtype=np.float64,
+            )
+
+            # Store negated matrix for CG
+            self._neg_A_gpu = gpu_csr_matrix(-A_csr)
+
     def solve(
         self,
         rho: cp.ndarray,
@@ -190,19 +245,33 @@ class PoissonSolverCylindrical:
         b = -rho / (self.kappa * EPSILON_0)
         b_flat = b.ravel()
 
-        # Apply Dirichlet BCs
-        for i in range(self.n_r):
-            for j in range(self.n_z):
-                k = self._node_index(i, j)
-                if i == self.n_r - 1 and self.bc_r_max == "dirichlet":
-                    b_flat[k] = phi_wall_r
-                elif j == 0 and self.bc_z_min == "dirichlet":
-                    b_flat[k] = phi_wall_z0
-                elif j == self.n_z - 1 and self.bc_z_max == "dirichlet":
-                    b_flat[k] = phi_wall_zL
+        # Vectorised Dirichlet BC application (replaces the Python loop)
+        if self._bc_r_max_idx is not None:
+            b_flat[self._bc_r_max_idx] = phi_wall_r
+        if self._bc_z0_idx is not None:
+            b_flat[self._bc_z0_idx] = phi_wall_z0
+        if self._bc_zL_idx is not None:
+            b_flat[self._bc_zL_idx] = phi_wall_zL
 
-        # Solve sparse system
-        phi_flat = gpu_spsolve(self._A_gpu, b_flat)
+        if self._use_iterative:
+            # Solve (-A)x = -b using CG (negated system is SPD)
+            neg_b = -b_flat
+            x0 = self._prev_phi
+            phi_flat, info = gpu_cg(
+                self._neg_A_gpu,
+                neg_b,
+                x0=x0,
+                atol=self._tol,
+                maxiter=self._max_iter,
+                M=self._preconditioner,
+            )
+            if info != 0:
+                # CG did not converge — fall back to direct solve
+                phi_flat = gpu_spsolve(self._A_gpu, b_flat)
+            self._prev_phi = phi_flat.copy()
+        else:
+            # Direct sparse solve
+            phi_flat = gpu_spsolve(self._A_gpu, b_flat)
 
         return phi_flat.reshape(self.n_r, self.n_z)
 

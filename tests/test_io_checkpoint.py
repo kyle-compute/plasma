@@ -10,6 +10,7 @@ from plasma.io.checkpoint import list_checkpoints, load_checkpoint, save_checkpo
 from plasma.io.hdf5_diagnostics import load_diagnostics, save_diagnostics_snapshot
 from plasma.pic.grid import CylindricalGrid
 from plasma.pic.particles import ParticleArray, Species
+from plasma.runtime.cupy_compat import cp
 from plasma.runtime.random import SimulationRNG, build_rng_from_state
 
 
@@ -152,7 +153,7 @@ class TestCheckpointRoundtrip:
 
         data = load_checkpoint(path)
         restored = build_rng_from_state(data["rng_state"])
-        np.testing.assert_allclose(rng.rand(6), restored.rand(6))
+        np.testing.assert_allclose(cp.asnumpy(rng.rand(6)), cp.asnumpy(restored.rand(6)))
 
     def test_list_checkpoints(self, tmp_path, grid, ion_species):
         ions = ParticleArray(species=ion_species)

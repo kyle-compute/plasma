@@ -98,31 +98,45 @@ class CylindricalGrid:
         """Compute volumes associated with each grid node (for node-centered quantities).
 
         Uses the dual-mesh approach: each node owns the volume from the
-        midpoints of its neighboring cells.
+        midpoints of its neighboring cells.  Result is cached after first call.
 
         Returns:
             Array of shape (nr+1, nz+1) with node volumes [m^3].
         """
+        if hasattr(self, "_node_volumes_cache"):
+            return self._node_volumes_cache
+
         vol = np.zeros((self.n_nodes_r, self.n_nodes_z))
 
-        for i in range(self.n_nodes_r):
-            # Radial bounds of the dual cell
-            if i == 0:
-                r_lo = 0.0
-                r_hi = 0.5 * self.dr
-            elif i == self.nr:
-                r_lo = self.r_max - 0.5 * self.dr
-                r_hi = self.r_max
-            else:
-                r_lo = self.r_edges[i] - 0.5 * self.dr
-                r_hi = self.r_edges[i] + 0.5 * self.dr
+        # Vectorised radial bounds
+        r_lo = np.empty(self.n_nodes_r)
+        r_hi = np.empty(self.n_nodes_r)
+        r_lo[0] = 0.0
+        r_hi[0] = 0.5 * self.dr
+        r_lo[self.nr] = self.r_max - 0.5 * self.dr
+        r_hi[self.nr] = self.r_max
+        interior = slice(1, self.nr)
+        r_lo[interior] = self.r_edges[interior] - 0.5 * self.dr
+        r_hi[interior] = self.r_edges[interior] + 0.5 * self.dr
 
-            # Axial extent of dual cell
-            for j in range(self.n_nodes_z):
-                dz_node = 0.5 * self.dz if j == 0 or j == self.nz else self.dz
-                vol[i, j] = np.pi * (r_hi**2 - r_lo**2) * dz_node
+        ring_area = np.pi * (r_hi**2 - r_lo**2)  # (n_nodes_r,)
 
+        # Axial extents
+        dz_nodes = np.full(self.n_nodes_z, self.dz)
+        dz_nodes[0] = 0.5 * self.dz
+        dz_nodes[self.nz] = 0.5 * self.dz
+
+        vol = ring_area[:, None] * dz_nodes[None, :]
+        self._node_volumes_cache = vol
         return vol
+
+    def node_volumes_gpu(self):
+        """Return node volumes as a cached GPU (CuPy) array."""
+        from plasma.runtime.cupy_compat import cp
+
+        if not hasattr(self, "_node_volumes_gpu_cache"):
+            self._node_volumes_gpu_cache = cp.asarray(self.node_volumes())
+        return self._node_volumes_gpu_cache
 
     def debye_length(self, n_e: float, te_ev: float) -> float:
         """Electron Debye length [m].

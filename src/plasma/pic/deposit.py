@@ -114,7 +114,7 @@ def deposit_charge(
 
     # Convert from accumulated charge to charge density
     # rho [C/m^3] = raw_charge / node_volume
-    node_vol = cp.asarray(grid.node_volumes())
+    node_vol = grid.node_volumes_gpu()
     # Avoid division by zero at nodes with zero volume
     node_vol_safe = cp.maximum(node_vol, 1e-30)
     rho = rho_raw / node_vol_safe
@@ -147,6 +147,6 @@ def deposit_number_density(
         n_part,
     )
 
-    node_vol = cp.asarray(grid.node_volumes())
+    node_vol = grid.node_volumes_gpu()
     node_vol_safe = cp.maximum(node_vol, 1e-30)
     return n_raw / node_vol_safe

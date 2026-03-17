@@ -92,7 +92,8 @@ class ParticleArray:
     ) -> int:
         """Add particles to the array. Returns number actually added.
 
-        If capacity is exceeded, grows the array by 2x.
+        If capacity is exceeded, grows by max(needed, 4x current) to
+        amortise growth overhead at scale.
         """
         r = cp.asarray(r, dtype=cp.float64)
         n_new = int(r.shape[0])
@@ -100,14 +101,14 @@ class ParticleArray:
         if n_new == 0:
             return 0
 
-        # Grow if needed
+        # Grow if needed — aggressive 4x to reduce repeated reallocs
         needed = self.count + n_new
         if needed > self.capacity:
-            self._grow(max(needed, self.capacity * 2))
+            self._grow(max(needed, self.capacity * 4, 4096))
 
         s = self.count
         e = s + n_new
-        self.r[s:e] = cp.asarray(r, dtype=cp.float64)
+        self.r[s:e] = r
         self.z[s:e] = cp.asarray(z, dtype=cp.float64)
         self.vr[s:e] = cp.asarray(vr, dtype=cp.float64)
         self.vz[s:e] = cp.asarray(vz, dtype=cp.float64)

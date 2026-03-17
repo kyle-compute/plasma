@@ -69,6 +69,20 @@ def uniform_cpu(rng: Any, size: int | tuple[int, ...]) -> np.ndarray:
     return np.asarray(cp.asnumpy(values), dtype=np.float64)
 
 
+def uniform_gpu(rng: Any, size: int | tuple[int, ...]) -> cp.ndarray:
+    """Draw deterministic uniform samples as a GPU array.
+
+    Uses the same underlying RNG state as uniform_cpu but returns
+    a CuPy array, avoiding an extra CPU->GPU copy when the caller
+    only needs values on the device.
+    """
+
+    shape = _normalise_size(size)
+    if rng is None:
+        return cp.asarray(np.random.random_sample(shape), dtype=cp.float64)
+    return rng.rand(*shape, dtype=cp.float64)
+
+
 def export_rng_state(rng: Any) -> dict[str, Any] | None:
     """Serialize RNG state when the generator supports it."""
 

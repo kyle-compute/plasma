@@ -1,10 +1,10 @@
 """Monte Carlo Collisions (MCC) for PIC projectiles against background species.
 
 Null-collision scheme loosely following Vahedi & Surendra (1995) and
-Taccogna 2023 Eq. 5.  Candidate selection (step 1) runs on GPU via
-CuPy; collision physics (accept/reject, scattering angles, energy
-partition) runs on CPU with NumPy.  This is adequate for prototype
-validation but is not a fully-GPU, reproducible-RNG implementation.
+Taccogna 2023 Eq. 5.  All collision physics — candidate selection,
+accept/reject, scattering, and product generation — runs on GPU via
+CuPy arrays.  Only aggregated counters and compact event-position
+arrays for live visualisation are transferred to CPU.
 
 Algorithm:
     1. Compute null-collision frequency from a *conservative sampled
@@ -16,7 +16,7 @@ Algorithm:
     2. Collision probability: P_null = 1 - exp(-nu_null * dt)
     3. For each particle, draw random u ~ U(0,1) on GPU:
        - If u > P_null: no collision (skip)
-       - If u <= P_null: transfer to CPU for accept/reject per-process
+       - If u <= P_null: accept/reject per-process
          using sigma_i(E) * v_rel / max_sample(sigma * v_rel).
 
 Collision types supported:
@@ -24,13 +24,6 @@ Collision types supported:
     - Excitation (inelastic, threshold energy removed, isotropic scatter)
     - Ionization (equal energy split between scattered and ejected electron)
     - Charge exchange (ion velocity replaced by thermal neutral velocity)
-
-Limitations:
-    - This remains a null-collision approximation with static background
-      reservoirs; it is not a full heavy-species transport solver.
-    - Ionization products are accumulated in lists per perform_collisions()
-      call, but are overwritten across successive calls — caller must
-      retrieve via get_new_electrons()/get_new_ions() before the next call.
 
 References:
     - Vahedi, V. & Surendra, M. (1995). Comp. Phys. Comm. 87, 179-198.
@@ -46,9 +39,9 @@ from enum import Enum, auto
 import numpy as np
 
 from plasma.core.constants import E_CHARGE, M_ELECTRON
-from plasma.data.cross_sections import CrossSectionTable
+from plasma.data.cross_sections import CrossSectionTable, eval_cross_section_gpu
 from plasma.runtime.cupy_compat import cp
-from plasma.runtime.random import SimulationRNG, uniform_cpu
+from plasma.runtime.random import SimulationRNG, uniform_cpu, uniform_gpu
 
 
 class CollisionType(Enum):
@@ -81,19 +74,24 @@ class CollisionProcess:
     product_ion_name: str | None = None
 
 
-def _concat_particle_dicts(buffers: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
-    """Concatenate a list of particle dicts (same keys) into one."""
+def _concat_particle_dicts(buffers: list[dict[str, cp.ndarray]]) -> dict[str, cp.ndarray]:
+    """Concatenate a list of particle dicts (same keys) into one.
+
+    Handles both CuPy and NumPy arrays.
+    """
     keys = buffers[0].keys()
-    return {k: np.concatenate([b[k] for b in buffers]) for k in keys}
+    first = buffers[0][next(iter(keys))]
+    if isinstance(first, np.ndarray):
+        return {k: np.concatenate([b[k] for b in buffers]) for k in keys}
+    return {k: cp.concatenate([b[k] for b in buffers]) for k in keys}
 
 
 @dataclass
 class MCCHandler:
     """Null-collision MCC handler for one projectile vs. one background species.
 
-    Candidate selection can run on GPU-backed arrays, while collision
-    scattering is sampled on CPU using the same shared RNG object so
-    checkpoint/restart and repeated seeds remain deterministic.
+    All collision physics runs on GPU.  Only aggregated counters and
+    compact event-position subsets are transferred to CPU.
 
     Attributes:
         projectile_mass: Mass of projectile species [kg].
@@ -121,9 +119,7 @@ class MCCHandler:
         nu_null = n_bg * max_sample(sum_i(sigma_i(E) * v_rel(E)))
 
         The maximum is estimated by sampling 2000 log-spaced energies in
-        [0.01, 10000] eV.  This is a conservative sampled bound, not an
-        exact supremum — adequate for cross-sections without narrow
-        resonance features between sample points.
+        [0.01, 10000] eV.
         """
         if not self.processes:
             self._max_sigma_vrel = 0.0
@@ -137,14 +133,9 @@ class MCCHandler:
         m_r = (self.projectile_mass * self.background_mass /
                (self.projectile_mass + self.background_mass))
 
-        # v_rel from kinetic energy: E = 0.5 * m_r * v^2 → v = sqrt(2E/m_r)
-        # But for electron-neutral: m_r ≈ m_e, and E is the electron energy
-        # For ion-neutral: use reduced mass
         if self.projectile_mass < 1e-28:
-            # Electron projectile: v = sqrt(2*E*e / m_e)
             v_rel = np.sqrt(2.0 * e_sample * E_CHARGE / self.projectile_mass)
         else:
-            # Ion projectile: v = sqrt(2*E*e / m_reduced)
             v_rel = np.sqrt(2.0 * e_sample * E_CHARGE / m_r)
 
         # Sum sigma*v over all processes at each energy
@@ -157,10 +148,7 @@ class MCCHandler:
         self._nu_null = self.background_density * self._max_sigma_vrel
 
     def collision_probability(self, dt: float) -> float:
-        """Null-collision probability for timestep dt.
-
-        P = 1 - exp(-nu_null * dt)
-        """
+        """Null-collision probability for timestep dt."""
         if self._nu_null <= 0:
             return 0.0
         return 1.0 - np.exp(-self._nu_null * dt)
@@ -173,10 +161,14 @@ class MCCHandler:
     ) -> dict[str, int]:
         """Perform MCC collisions on all particles of this species.
 
+        All collision physics runs on GPU.  Velocities are never
+        transferred to CPU; only final counters and compact event
+        positions leave the device.
+
         Args:
             particles: ParticleArray of projectile species.
             dt: Timestep [s].
-            rng: CuPy random state (for reproducibility).
+            rng: SimulationRNG (for reproducibility).
 
         Returns:
             Dict of collision counts by process name.
@@ -185,10 +177,10 @@ class MCCHandler:
             rng = SimulationRNG()
 
         # Clear ionization product buffers from any prior call
-        self._new_electron_buffers = []
-        self._new_ion_buffers_by_species = {}
-        self._event_buffers = {}
-        self._weight_sums = {}
+        self._new_electron_buffers: list[dict[str, cp.ndarray]] = []
+        self._new_ion_buffers_by_species: dict[str, list[dict[str, cp.ndarray]]] = {}
+        self._event_buffers: dict[str, dict[str, np.ndarray]] = {}
+        self._weight_sums: dict[str, float] = {}
 
         n = particles.count
         if n == 0 or not self.processes:
@@ -198,70 +190,69 @@ class MCCHandler:
         if p_null <= 0:
             return {}
 
-        # Step 1: Determine which particles undergo a potential collision
+        # Step 1: Determine which particles undergo a potential collision (GPU)
         rand_select = rng.rand(n, dtype=cp.float64)
         alive_mask = particles.alive[:n] == 1
         collide_mask = (rand_select < p_null) & alive_mask
 
-        # Get indices of particles that potentially collide
         collide_indices = cp.where(collide_mask)[0]
         n_collide = len(collide_indices)
 
         if n_collide == 0:
             return {}
 
-        # Step 2: Get particle velocities and compute energies
-        vr = cp.asnumpy(particles.vr[:n][collide_indices])
-        vz = cp.asnumpy(particles.vz[:n][collide_indices])
-        vt = cp.asnumpy(particles.vtheta[:n][collide_indices])
+        # Step 2: Extract candidate velocities on GPU (no CPU transfer!)
+        vr = particles.vr[:n][collide_indices]
+        vz = particles.vz[:n][collide_indices]
+        vt = particles.vtheta[:n][collide_indices]
         v2 = vr**2 + vz**2 + vt**2
-        v_mag = np.sqrt(v2)
+        v_mag = cp.sqrt(v2)
 
-        # Kinetic energy in eV
+        # Kinetic energy in eV (GPU)
         energy_ev = 0.5 * self.projectile_mass * v2 / E_CHARGE
 
-        # Step 3: Accept/reject for each collision type
-        # For each potential collision, compute sigma_i * v_rel / max(sigma * v_rel)
+        # Step 3: Accept/reject for each collision type (GPU)
         counts: dict[str, int] = {}
-        processed = np.zeros(n_collide, dtype=bool)
+        processed = cp.zeros(n_collide, dtype=cp.bool_)
 
-        # Random number for accept/reject (CPU-side, unseeded)
-        rand_type = uniform_cpu(rng, n_collide)
-
-        cumulative_prob = np.zeros(n_collide)
+        rand_type = uniform_gpu(rng, n_collide)
+        cumulative_prob = cp.zeros(n_collide, dtype=cp.float64)
 
         for proc in self.processes:
-            sigma = proc.cross_section(energy_ev)
+            # GPU cross-section evaluation
+            log_e_gpu, log_s_gpu = proc.cross_section.gpu_log_data()
+            sigma = eval_cross_section_gpu(
+                energy_ev, log_e_gpu, log_s_gpu,
+                proc.cross_section.e_min, proc.cross_section.e_max,
+            )
             sigma_vrel = sigma * v_mag
 
-            # Probability of this collision type (relative to null)
-            p_type = np.where(
-                self._max_sigma_vrel > 0,
-                sigma_vrel / self._max_sigma_vrel,
-                0.0,
-            )
+            if self._max_sigma_vrel > 0:
+                p_type = sigma_vrel / self._max_sigma_vrel
+            else:
+                p_type = cp.zeros_like(sigma_vrel)
+            cumulative_prob = cumulative_prob + p_type
 
-            cumulative_prob += p_type
-
-            # Particles that get this collision type
             this_collision = (~processed) & (rand_type < cumulative_prob)
-            collision_idx = np.where(this_collision)[0]
+            collision_idx = cp.where(this_collision)[0]
 
             if len(collision_idx) == 0:
                 counts[proc.name] = 0
                 continue
 
-            # Get original particle indices
-            orig_idx = cp.asnumpy(collide_indices[collision_idx])
+            # Get original particle indices (GPU)
+            orig_idx = collide_indices[collision_idx]
+
+            # Pull compact event positions to CPU for live visualisation
             self._event_buffers[proc.name] = {
-                "r": cp.asnumpy(particles.r[cp.asarray(orig_idx)]),
-                "z": cp.asnumpy(particles.z[cp.asarray(orig_idx)]),
+                "r": cp.asnumpy(particles.r[orig_idx]),
+                "z": cp.asnumpy(particles.z[orig_idx]),
             }
             self._weight_sums[proc.name] = float(
-                np.sum(cp.asnumpy(particles.weight[cp.asarray(orig_idx)]))
+                cp.sum(particles.weight[orig_idx]).item()
             )
 
-            # Apply collision
+            # Apply collision on GPU
             n_events = self._apply_collision(
                 proc, particles, orig_idx,
                 energy_ev[collision_idx], v_mag[collision_idx],
@@ -271,28 +262,23 @@ class MCCHandler:
             counts[proc.name] = n_events
             processed[collision_idx] = True
 
-        # Remaining particles had null collisions (no effect)
-        counts["null"] = int(np.sum(~processed))
-
+        counts["null"] = int(cp.sum(~processed).item())
         return counts
 
     def _apply_collision(
         self,
         process: CollisionProcess,
         particles,
-        indices: np.ndarray,
-        energy_ev: np.ndarray,
-        v_mag: np.ndarray,
-        vr: np.ndarray,
-        vz: np.ndarray,
-        vt: np.ndarray,
+        indices: cp.ndarray,
+        energy_ev: cp.ndarray,
+        v_mag: cp.ndarray,
+        vr: cp.ndarray,
+        vz: cp.ndarray,
+        vt: cp.ndarray,
         *,
         rng,
     ) -> int:
-        """Apply a specific collision to selected particles.
-
-        Returns number of collisions applied.
-        """
+        """Apply a specific collision to selected particles (all GPU)."""
         n = len(indices)
         if n == 0:
             return 0
@@ -303,10 +289,7 @@ class MCCHandler:
             self._excitation(particles, indices, energy_ev, v_mag, process.threshold_ev, rng=rng)
         elif process.collision_type == CollisionType.IONIZATION:
             self._ionization(
-                particles,
-                indices,
-                energy_ev,
-                v_mag,
+                particles, indices, energy_ev, v_mag,
                 process.threshold_ev,
                 product_ion_name=process.product_ion_name,
                 rng=rng,
@@ -319,135 +302,109 @@ class MCCHandler:
     def _elastic_scatter(
         self,
         particles,
-        indices: np.ndarray,
-        energy_ev: np.ndarray,
-        v_mag: np.ndarray,
+        indices: cp.ndarray,
+        energy_ev: cp.ndarray,
+        v_mag: cp.ndarray,
         *,
         rng,
     ) -> None:
-        """Isotropic elastic scattering.
-
-        For electron-neutral: electron is deflected, loses energy fraction
-        ~ 2*m_e/M (very small). We randomize direction, keeping |v| constant.
-
-        For ion-neutral: isotropic scattering in CM frame.
-        """
+        """Isotropic elastic scattering (GPU)."""
         n = len(indices)
-        # Isotropic scattering: random direction, same speed
-        cos_theta = 2.0 * uniform_cpu(rng, n) - 1.0
-        sin_theta = np.sqrt(1.0 - cos_theta**2)
-        phi = 2.0 * np.pi * uniform_cpu(rng, n)
+        cos_theta = 2.0 * uniform_gpu(rng, n) - 1.0
+        sin_theta = cp.sqrt(1.0 - cos_theta**2)
+        phi = 2.0 * cp.pi * uniform_gpu(rng, n)
 
-        # Energy loss for electrons: delta_E/E = 2*m_e/M per collision
         mass_ratio = self.projectile_mass / self.background_mass
         energy_loss_frac = 2.0 * mass_ratio
-        new_speed = v_mag * np.sqrt(1.0 - energy_loss_frac)
+        new_speed = v_mag * cp.sqrt(1.0 - energy_loss_frac)
 
-        new_vr = new_speed * sin_theta * np.cos(phi)
-        new_vz = new_speed * cos_theta
-        new_vt = new_speed * sin_theta * np.sin(phi)
-
-        idx_gpu = cp.asarray(indices)
-        particles.vr[idx_gpu] = cp.asarray(new_vr)
-        particles.vz[idx_gpu] = cp.asarray(new_vz)
-        particles.vtheta[idx_gpu] = cp.asarray(new_vt)
+        particles.vr[indices] = new_speed * sin_theta * cp.cos(phi)
+        particles.vz[indices] = new_speed * cos_theta
+        particles.vtheta[indices] = new_speed * sin_theta * cp.sin(phi)
 
     def _excitation(
         self,
         particles,
-        indices: np.ndarray,
-        energy_ev: np.ndarray,
-        v_mag: np.ndarray,
+        indices: cp.ndarray,
+        energy_ev: cp.ndarray,
+        v_mag: cp.ndarray,
         threshold_ev: float,
         *,
         rng,
     ) -> None:
-        """Inelastic excitation: electron loses threshold energy.
-
-        Post-collision speed: v' = sqrt(v^2 - 2*E_threshold*e/m)
-        Direction is randomized (isotropic).
-        """
+        """Inelastic excitation (GPU)."""
         n = len(indices)
-        # New kinetic energy after excitation
-        new_energy_ev = np.maximum(energy_ev - threshold_ev, 0.01)
-        new_speed = np.sqrt(2.0 * new_energy_ev * E_CHARGE / self.projectile_mass)
+        new_energy_ev = cp.maximum(energy_ev - threshold_ev, 0.01)
+        new_speed = cp.sqrt(2.0 * new_energy_ev * E_CHARGE / self.projectile_mass)
 
-        # Isotropic post-collision direction
-        cos_theta = 2.0 * uniform_cpu(rng, n) - 1.0
-        sin_theta = np.sqrt(1.0 - cos_theta**2)
-        phi = 2.0 * np.pi * uniform_cpu(rng, n)
+        cos_theta = 2.0 * uniform_gpu(rng, n) - 1.0
+        sin_theta = cp.sqrt(1.0 - cos_theta**2)
+        phi = 2.0 * cp.pi * uniform_gpu(rng, n)
 
-        idx_gpu = cp.asarray(indices)
-        particles.vr[idx_gpu] = cp.asarray(new_speed * sin_theta * np.cos(phi))
-        particles.vz[idx_gpu] = cp.asarray(new_speed * cos_theta)
-        particles.vtheta[idx_gpu] = cp.asarray(new_speed * sin_theta * np.sin(phi))
+        particles.vr[indices] = new_speed * sin_theta * cp.cos(phi)
+        particles.vz[indices] = new_speed * cos_theta
+        particles.vtheta[indices] = new_speed * sin_theta * cp.sin(phi)
 
     def _ionization(
         self,
         particles,
-        indices: np.ndarray,
-        energy_ev: np.ndarray,
-        v_mag: np.ndarray,
+        indices: cp.ndarray,
+        energy_ev: cp.ndarray,
+        v_mag: cp.ndarray,
         threshold_ev: float,
         *,
         product_ion_name: str | None,
         rng,
     ) -> None:
-        """Electron-impact ionization: incident e loses energy, new e + ion created.
+        """Electron-impact ionization (GPU).
 
-        Energy partition:
-        - Incident electron loses E_threshold
-        - Remaining energy split between incident and ejected electron
-          (equal sharing is simplest; Opal-Peterson-Beaty for better physics)
+        Scattered incident electron and new ejected electron + ion
+        are all computed on GPU.
         """
         n = len(indices)
-        # Remaining energy after ionization, split equally
-        remaining_ev = np.maximum(energy_ev - threshold_ev, 0.01)
+        remaining_ev = cp.maximum(energy_ev - threshold_ev, 0.01)
         share_ev = remaining_ev * 0.5
 
-        # Scattered incident electron
-        new_speed = np.sqrt(2.0 * share_ev * E_CHARGE / self.projectile_mass)
-        cos_theta = 2.0 * uniform_cpu(rng, n) - 1.0
-        sin_theta = np.sqrt(1.0 - cos_theta**2)
-        phi = 2.0 * np.pi * uniform_cpu(rng, n)
+        # Scattered incident electron (GPU)
+        new_speed = cp.sqrt(2.0 * share_ev * E_CHARGE / self.projectile_mass)
+        cos_theta = 2.0 * uniform_gpu(rng, n) - 1.0
+        sin_theta = cp.sqrt(1.0 - cos_theta**2)
+        phi = 2.0 * cp.pi * uniform_gpu(rng, n)
 
-        idx_gpu = cp.asarray(indices)
-        particles.vr[idx_gpu] = cp.asarray(new_speed * sin_theta * np.cos(phi))
-        particles.vz[idx_gpu] = cp.asarray(new_speed * cos_theta)
-        particles.vtheta[idx_gpu] = cp.asarray(new_speed * sin_theta * np.sin(phi))
+        particles.vr[indices] = new_speed * sin_theta * cp.cos(phi)
+        particles.vz[indices] = new_speed * cos_theta
+        particles.vtheta[indices] = new_speed * sin_theta * cp.sin(phi)
 
-        # New ejected electron — born at same position, with remaining energy share
-        ejected_speed = np.sqrt(2.0 * share_ev * E_CHARGE / self.projectile_mass)
-        cos_theta2 = 2.0 * uniform_cpu(rng, n) - 1.0
-        sin_theta2 = np.sqrt(1.0 - cos_theta2**2)
-        phi2 = 2.0 * np.pi * uniform_cpu(rng, n)
+        # Ejected electron — born at collision site (GPU)
+        ejected_speed = cp.sqrt(2.0 * share_ev * E_CHARGE / self.projectile_mass)
+        cos_theta2 = 2.0 * uniform_gpu(rng, n) - 1.0
+        sin_theta2 = cp.sqrt(1.0 - cos_theta2**2)
+        phi2 = 2.0 * cp.pi * uniform_gpu(rng, n)
 
-        # Get positions and weights of ionizing electrons
-        r_new = cp.asnumpy(particles.r[idx_gpu])
-        z_new = cp.asnumpy(particles.z[idx_gpu])
-        w_new = cp.asnumpy(particles.weight[idx_gpu])
+        # Positions and weights stay on GPU
+        r_new = particles.r[indices]
+        z_new = particles.z[indices]
+        w_new = particles.weight[indices]
 
-        # Buffer new electrons (append, don't overwrite — supports multiple
-        # ionization channels within one perform_collisions() call).
         electron_data = {
-            "r": r_new,
-            "z": z_new,
-            "vr": ejected_speed * sin_theta2 * np.cos(phi2),
+            "r": r_new.copy(),
+            "z": z_new.copy(),
+            "vr": ejected_speed * sin_theta2 * cp.cos(phi2),
             "vz": ejected_speed * cos_theta2,
-            "vtheta": ejected_speed * sin_theta2 * np.sin(phi2),
-            "weight": w_new,
+            "vtheta": ejected_speed * sin_theta2 * cp.sin(phi2),
+            "weight": w_new.copy(),
         }
         if not hasattr(self, "_new_electron_buffers"):
             self._new_electron_buffers = []
         self._new_electron_buffers.append(electron_data)
 
-        # New ions born cold at collision site
+        # New ions born cold at collision site (GPU)
         ion_data = {
             "r": r_new.copy(),
             "z": z_new.copy(),
-            "vr": np.zeros(n),
-            "vz": np.zeros(n),
-            "vtheta": np.zeros(n),
+            "vr": cp.zeros(n, dtype=cp.float64),
+            "vz": cp.zeros(n, dtype=cp.float64),
+            "vtheta": cp.zeros(n, dtype=cp.float64),
             "weight": w_new.copy(),
         }
         if not hasattr(self, "_new_ion_buffers_by_species"):
@@ -458,36 +415,27 @@ class MCCHandler:
     def _charge_exchange(
         self,
         particles,
-        indices: np.ndarray,
+        indices: cp.ndarray,
         *,
         rng,
     ) -> None:
-        """Charge exchange: fast ion → slow ion (swap with cold neutral).
-
-        The ion becomes a fast neutral (leaves simulation if we don't track neutrals)
-        and a new cold ion is created at the collision site.
-
-        Simplified model: ion velocity is set to thermal background velocity.
-        """
+        """Charge exchange: fast ion → slow ion (GPU)."""
         n = len(indices)
-        # Replace ion velocity with thermal neutral velocity
-        # v_th = sqrt(kT/m) ≈ sqrt(0.026 eV * e / M) for room temperature
         v_th = np.sqrt(0.026 * E_CHARGE / self.background_mass)
 
-        cos_theta = 2.0 * uniform_cpu(rng, n) - 1.0
-        sin_theta = np.sqrt(1.0 - cos_theta**2)
-        phi = 2.0 * np.pi * uniform_cpu(rng, n)
+        cos_theta = 2.0 * uniform_gpu(rng, n) - 1.0
+        sin_theta = cp.sqrt(1.0 - cos_theta**2)
+        phi = 2.0 * cp.pi * uniform_gpu(rng, n)
 
-        idx_gpu = cp.asarray(indices)
-        particles.vr[idx_gpu] = cp.asarray(v_th * sin_theta * np.cos(phi))
-        particles.vz[idx_gpu] = cp.asarray(v_th * cos_theta)
-        particles.vtheta[idx_gpu] = cp.asarray(v_th * sin_theta * np.sin(phi))
+        particles.vr[indices] = v_th * sin_theta * cp.cos(phi)
+        particles.vz[indices] = v_th * cos_theta
+        particles.vtheta[indices] = v_th * sin_theta * cp.sin(phi)
 
-    def get_new_electrons(self) -> dict[str, np.ndarray] | None:
+    def get_new_electrons(self) -> dict[str, cp.ndarray] | None:
         """Retrieve newly created electrons from ionization events.
 
-        Concatenates products from all ionization channels within the
-        last perform_collisions() call, then clears the buffer.
+        Returns GPU (CuPy) arrays — ParticleArray.add_particles handles
+        these directly via cp.asarray (no-op for device arrays).
         """
         buffers = getattr(self, "_new_electron_buffers", None)
         if not buffers:
@@ -507,19 +455,15 @@ class MCCHandler:
             for name, cloud in buffers.items()
         }
 
-    def get_new_ions(self) -> dict[str, np.ndarray] | None:
-        """Retrieve newly created ions from ionization events.
-
-        Concatenates products from all ionization channels within the
-        last perform_collisions() call, then clears the buffer.
-        """
+    def get_new_ions(self) -> dict[str, cp.ndarray] | None:
+        """Retrieve newly created ions from ionization events."""
         ion_map = self.get_new_ions_by_species()
         if not ion_map:
             return None
         result = _concat_particle_dicts(list(ion_map.values()))
         return result
 
-    def get_new_ions_by_species(self) -> dict[str, dict[str, np.ndarray]]:
+    def get_new_ions_by_species(self) -> dict[str, dict[str, cp.ndarray]]:
         """Retrieve newly created ions, keyed by product species name."""
 
         buffers_by_species = getattr(self, "_new_ion_buffers_by_species", None)
@@ -564,11 +508,15 @@ def _merge_event_cloud(
 
 @dataclass
 class CompositeMCCHandler:
-    """Aggregate multiple background-specific MCC handlers for one projectile."""
+    """Aggregate multiple background-specific MCC handlers for one projectile.
+
+    GPU-accelerated: candidate selection, velocity extraction, energy
+    computation, accept/reject, and scattering all run on GPU.
+    """
 
     handlers: list[MCCHandler] = field(default_factory=list)
-    _new_electron_buffers: list[dict[str, np.ndarray]] = field(default_factory=list)
-    _new_ion_buffers_by_species: dict[str, list[dict[str, np.ndarray]]] = field(default_factory=dict)
+    _new_electron_buffers: list[dict[str, cp.ndarray]] = field(default_factory=list)
+    _new_ion_buffers_by_species: dict[str, list[dict[str, cp.ndarray]]] = field(default_factory=dict)
     _event_buffers: dict[str, dict[str, np.ndarray]] = field(default_factory=dict)
     _weight_sums: dict[str, float] = field(default_factory=dict)
 
@@ -602,6 +550,7 @@ class CompositeMCCHandler:
         if p_null <= 0.0:
             return counts
 
+        # Candidate selection (GPU)
         rand_select = rng.rand(n, dtype=cp.float64)
         alive_mask = particles.alive[:n] == 1
         collide_mask = (rand_select < p_null) & alive_mask
@@ -610,54 +559,59 @@ class CompositeMCCHandler:
         if n_collide == 0:
             return counts
 
-        vr = cp.asnumpy(particles.vr[:n][collide_indices])
-        vz = cp.asnumpy(particles.vz[:n][collide_indices])
-        vt = cp.asnumpy(particles.vtheta[:n][collide_indices])
+        # Extract candidate velocities on GPU (no CPU transfer!)
+        vr = particles.vr[:n][collide_indices]
+        vz = particles.vz[:n][collide_indices]
+        vt = particles.vtheta[:n][collide_indices]
         v2 = vr**2 + vz**2 + vt**2
-        v_mag = np.sqrt(v2)
+        v_mag = cp.sqrt(v2)
         energy_ev = 0.5 * self.handlers[0].projectile_mass * v2 / E_CHARGE
-        rand_type = uniform_cpu(rng, n_collide)
-        processed = np.zeros(n_collide, dtype=bool)
-        cumulative_prob = np.zeros(n_collide, dtype=np.float64)
+
+        rand_type = uniform_gpu(rng, n_collide)
+        processed = cp.zeros(n_collide, dtype=cp.bool_)
+        cumulative_prob = cp.zeros(n_collide, dtype=cp.float64)
 
         for handler in self.handlers:
             for proc in handler.processes:
-                sigma = proc.cross_section(energy_ev)
+                # GPU cross-section evaluation
+                log_e_gpu, log_s_gpu = proc.cross_section.gpu_log_data()
+                sigma = eval_cross_section_gpu(
+                    energy_ev, log_e_gpu, log_s_gpu,
+                    proc.cross_section.e_min, proc.cross_section.e_max,
+                )
                 rate = handler.background_density * sigma * v_mag
-                cumulative_prob += np.where(total_upper > 0.0, rate / total_upper, 0.0)
+                cumulative_prob = cumulative_prob + cp.where(
+                    total_upper > 0.0, rate / total_upper, 0.0,
+                )
                 this_collision = (~processed) & (rand_type < cumulative_prob)
-                collision_idx = np.where(this_collision)[0]
+                collision_idx = cp.where(this_collision)[0]
                 if len(collision_idx) == 0:
                     counts.setdefault(proc.name, 0)
                     continue
 
-                orig_idx = cp.asnumpy(collide_indices[collision_idx])
-                idx_gpu = cp.asarray(orig_idx)
+                orig_idx = collide_indices[collision_idx]
+
+                # Compact event positions to CPU for live viz
                 _merge_event_cloud(
                     self._event_buffers,
                     proc.name,
                     {
-                        "r": cp.asnumpy(particles.r[idx_gpu]),
-                        "z": cp.asnumpy(particles.z[idx_gpu]),
+                        "r": cp.asnumpy(particles.r[orig_idx]),
+                        "z": cp.asnumpy(particles.z[orig_idx]),
                     },
                 )
                 self._weight_sums[proc.name] = self._weight_sums.get(proc.name, 0.0) + float(
-                    np.sum(cp.asnumpy(particles.weight[idx_gpu]))
+                    cp.sum(particles.weight[orig_idx]).item()
                 )
                 counts[proc.name] = counts.get(proc.name, 0) + handler._apply_collision(
-                    proc,
-                    particles,
-                    orig_idx,
-                    energy_ev[collision_idx],
-                    v_mag[collision_idx],
-                    vr[collision_idx],
-                    vz[collision_idx],
-                    vt[collision_idx],
+                    proc, particles, orig_idx,
+                    energy_ev[collision_idx], v_mag[collision_idx],
+                    vr[collision_idx], vz[collision_idx], vt[collision_idx],
                     rng=rng,
                 )
                 processed[collision_idx] = True
 
-        counts["null"] = int(np.sum(~processed))
+        counts["null"] = int(cp.sum(~processed).item())
         for handler in self.handlers:
             child_electrons = handler.get_new_electrons()
             if child_electrons is not None:
@@ -666,20 +620,20 @@ class CompositeMCCHandler:
                 self._new_ion_buffers_by_species.setdefault(species_name, []).append(ion_data)
         return counts
 
-    def get_new_electrons(self) -> dict[str, np.ndarray] | None:
+    def get_new_electrons(self) -> dict[str, cp.ndarray] | None:
         if not self._new_electron_buffers:
             return None
         result = _concat_particle_dicts(self._new_electron_buffers)
         self._new_electron_buffers = []
         return result
 
-    def get_new_ions(self) -> dict[str, np.ndarray] | None:
+    def get_new_ions(self) -> dict[str, cp.ndarray] | None:
         ions_by_species = self.get_new_ions_by_species()
         if not ions_by_species:
             return None
         return _concat_particle_dicts(list(ions_by_species.values()))
 
-    def get_new_ions_by_species(self) -> dict[str, dict[str, np.ndarray]]:
+    def get_new_ions_by_species(self) -> dict[str, dict[str, cp.ndarray]]:
         if not self._new_ion_buffers_by_species:
             return {}
         result = {
@@ -718,17 +672,7 @@ def make_electron_ar_mcc(
     sigma_excitation: CrossSectionTable | None = None,
     sigma_ionization: CrossSectionTable | None = None,
 ) -> MCCHandler:
-    """Create MCC handler for electron-Ar collisions.
-
-    Args:
-        n_ar: Argon neutral density [m^-3].
-        sigma_elastic: Elastic cross-section table (e + Ar -> e + Ar).
-        sigma_excitation: Excitation cross-section (e + Ar -> Ar* + e).
-        sigma_ionization: Ionization cross-section (e + Ar -> Ar+ + 2e).
-
-    Returns:
-        Configured MCCHandler.
-    """
+    """Create MCC handler for electron-Ar collisions."""
     from plasma.core.constants import M_AR
 
     handler = MCCHandler(

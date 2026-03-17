@@ -8,6 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from plasma.data.lxcat_parser import parse_lxcat_tsv
+from plasma.runtime.cupy_compat import cp
 
 
 class CrossSectionTable:
@@ -71,9 +72,41 @@ class CrossSectionTable:
         """Maximum cross-section value [m^2]."""
         return float(np.max(self.sigma_m2))
 
+    def gpu_log_data(self) -> tuple[cp.ndarray, cp.ndarray]:
+        """Return cached GPU arrays of log-energy and log-sigma for device-side interpolation."""
+
+        if not hasattr(self, "_gpu_log_energy"):
+            self._gpu_log_energy = cp.asarray(self._log_energy)
+            self._gpu_log_sigma = cp.asarray(self._log_sigma)
+        return self._gpu_log_energy, self._gpu_log_sigma
+
     def __repr__(self) -> str:
         return (
             f"CrossSectionTable('{self.name}', "
             f"{len(self.energy_ev)} pts, "
             f"E=[{self.e_min:.2f}, {self.e_max:.2f}] eV)"
         )
+
+
+def eval_cross_section_gpu(
+    energy_ev: cp.ndarray,
+    log_energy_gpu: cp.ndarray,
+    log_sigma_gpu: cp.ndarray,
+    e_min: float,
+    e_max: float,
+) -> cp.ndarray:
+    """Evaluate cross-section on GPU using log-log interpolation.
+
+    Mirrors CrossSectionTable.__call__ but operates entirely on CuPy arrays.
+    """
+
+    result = cp.zeros_like(energy_ev)
+    in_range = energy_ev >= e_min
+    n_in = int(cp.sum(in_range).item())
+    if n_in == 0:
+        return result
+    e_clip = cp.clip(energy_ev[in_range], e_min, e_max)
+    log_e = cp.log(e_clip)
+    log_s = cp.interp(log_e, log_energy_gpu, log_sigma_gpu)
+    result[in_range] = cp.exp(log_s)
+    return result
