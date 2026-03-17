@@ -13,8 +13,8 @@ function ensures momentum conservation (Birdsall & Langdon, Ch. 8).
 
 from __future__ import annotations
 
-import cupy as cp
-from numba import cuda
+from plasma.runtime.cupy_compat import cp
+from plasma.runtime.numba_compat import cuda
 
 
 @cuda.jit(fastmath=True)

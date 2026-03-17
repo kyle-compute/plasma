@@ -21,6 +21,7 @@ from plasma.pic.mcc import (
     make_electron_ar_mcc,
 )
 from plasma.pic.particles import ParticleArray, Species
+from plasma.runtime.random import SimulationRNG
 
 
 def make_constant_cross_section(sigma_val: float, name: str = "const") -> CrossSectionTable:
@@ -122,6 +123,40 @@ class TestNullCollisionProbability:
 
 
 class TestElasticCollisions:
+    def test_elastic_is_deterministic_for_same_seed(self, electron_beam, electron):
+        sigma = make_constant_cross_section(5e-20)
+
+        def build_handler() -> MCCHandler:
+            handler = MCCHandler(
+                projectile_mass=M_ELECTRON,
+                background_mass=M_AR,
+                background_density=1e20,
+            )
+            handler.add_process(
+                CollisionProcess(
+                    name="elastic",
+                    collision_type=CollisionType.ELASTIC,
+                    cross_section=sigma,
+                )
+            )
+            return handler
+
+        def clone_particles(source: ParticleArray) -> ParticleArray:
+            clone = ParticleArray(species=source.species)
+            clone.allocate(source.capacity)
+            clone.add_particles(**source.to_numpy())
+            return clone
+
+        beam_a = clone_particles(electron_beam)
+        beam_b = clone_particles(electron_beam)
+        counts_a = build_handler().perform_collisions(beam_a, dt=1e-9, rng=SimulationRNG(42))
+        counts_b = build_handler().perform_collisions(beam_b, dt=1e-9, rng=SimulationRNG(42))
+
+        assert counts_a == counts_b
+        np.testing.assert_allclose(cp.asnumpy(beam_a.vr[: beam_a.count]), cp.asnumpy(beam_b.vr[: beam_b.count]))
+        np.testing.assert_allclose(cp.asnumpy(beam_a.vz[: beam_a.count]), cp.asnumpy(beam_b.vz[: beam_b.count]))
+        np.testing.assert_allclose(cp.asnumpy(beam_a.vtheta[: beam_a.count]), cp.asnumpy(beam_b.vtheta[: beam_b.count]))
+
     def test_elastic_changes_velocity(self, electron_beam, electron):
         """Elastic collisions should change particle velocities."""
         sigma = make_constant_cross_section(5e-20)  # Large for many collisions

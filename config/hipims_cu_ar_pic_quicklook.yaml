@@ -2,6 +2,7 @@
 base: hipims_cu_ar_pic_public.yaml
 
 name: "hipims_cu_ar_pic_quicklook"
+mode: "smoke"
 
 grid:
   nr: 24

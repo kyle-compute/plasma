@@ -1,0 +1,20 @@
+package:
+  name: "cu_ar_public_v1"
+  version: "1"
+  material_system: "Cu/Ar"
+  target_material: "Cu"
+  provenance: "literature-fit"
+  notes: "Shared Cu/Ar defaults for configs, surface data, and public benchmark inputs."
+
+shared:
+  gas:
+    species: "Ar"
+  target:
+    material: "Cu"
+  surface_package: "../surface_packages/cu_target_public_v1.yaml"
+
+global:
+  reactions_file: "../reactions/gudmundsson_cu_ar.yaml"
+
+pic:
+  collision_package: "../collision_packages/cu_ar_public_v1.yaml"

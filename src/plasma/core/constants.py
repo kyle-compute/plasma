@@ -23,6 +23,12 @@ M_AR = 39.948 * AMU              # Argon
 M_CU = 63.546 * AMU              # Copper
 M_TI = 47.867 * AMU              # Titanium
 M_AL = 26.982 * AMU              # Aluminum
+MATERIAL_MASSES = {
+    "Ar": M_AR,
+    "Cu": M_CU,
+    "Ti": M_TI,
+    "Al": M_AL,
+}
 
 # Common thresholds [eV]
 E_IONIZATION_AR = 15.76          # Ar ground state ionization
@@ -30,3 +36,12 @@ E_METASTABLE_AR = 11.55          # Ar(4s[3/2]_2) metastable
 E_RESONANT_AR = 11.72            # Ar(4s'[1/2]_0) resonant
 E_IONIZATION_CU = 7.726          # Cu ground state ionization
 E_IONIZATION_TI = 6.828          # Ti ground state ionization
+
+
+def material_mass_kg(symbol: str) -> float:
+    """Return the mass of one named material species in kilograms."""
+
+    try:
+        return MATERIAL_MASSES[symbol]
+    except KeyError as exc:
+        raise KeyError(f"Unsupported material '{symbol}'.") from exc

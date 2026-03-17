@@ -1,0 +1,32 @@
+base: base.yaml
+
+default_profile: "monitor"
+default_duration: "test_36m"
+
+profiles:
+  - key: "quicklook"
+    title: "Quicklook"
+    base_config: "../hipims_cu_ar_pic_quicklook.yaml"
+    notes: "Tiny interactive case for a fast smoke check."
+  - key: "monitor"
+    title: "Monitor"
+    base_config: "../hipims_cu_ar_pic_monitor.yaml"
+    notes: "Desktop monitor profile used for the 4080 workflow."
+
+durations:
+  - key: "smoke"
+    title: "Smoke"
+    n_steps: 1200
+    est_wallclock: "~30-40 s"
+  - key: "monitor"
+    title: "Monitor"
+    n_steps: 4000
+    est_wallclock: "~7-8 min"
+  - key: "test_36m"
+    title: "36 Min Test"
+    n_steps: 20000
+    est_wallclock: "~36 min"
+  - key: "overnight"
+    title: "Overnight"
+    n_steps: 100000
+    est_wallclock: "~3 h to overnight depending on profile"

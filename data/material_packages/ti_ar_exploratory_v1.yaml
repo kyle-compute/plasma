@@ -1,0 +1,14 @@
+package:
+  name: "ti_ar_exploratory_v1"
+  version: "1"
+  material_system: "Ti/Ar"
+  target_material: "Ti"
+  provenance: "heuristic"
+  notes: "Exploratory Ti/Ar defaults. Public Ti reaction and collision datasets are not bundled yet."
+
+shared:
+  gas:
+    species: "Ar"
+  target:
+    material: "Ti"
+  surface_package: "../surface_packages/ti_target_exploratory_v1.yaml"

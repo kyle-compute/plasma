@@ -38,7 +38,7 @@ class TestIRMInitialState:
     def test_quasineutrality(self, irm):
         """Initial state should satisfy n_e = sum(Z_i * n_i)."""
         y0 = irm.initial_state()
-        n_e = y0[STATE_INDICES["e_cold"]]
+        n_e = y0[STATE_INDICES["e_cold"]] + y0[STATE_INDICES["e_hot"]]
         n_charge = (
             y0[STATE_INDICES["Ar+"]]
             + 2.0 * y0[STATE_INDICES["Ar2+"]]
@@ -53,7 +53,13 @@ class TestIRMInitialState:
 
     def test_positive_energy(self, irm):
         y0 = irm.initial_state()
-        assert y0[STATE_INDICES["energy"]] > 0
+        assert y0[STATE_INDICES["energy_cold"]] > 0
+        assert y0[STATE_INDICES["energy_hot"]] > 0
+
+    def test_hot_electron_seed_is_present(self, irm):
+        y0 = irm.initial_state()
+        assert y0[STATE_INDICES["e_hot"]] > 0
+        assert y0[STATE_INDICES["current_circuit"]] >= 0.0
 
 
 class TestIRMRHS:
@@ -106,3 +112,13 @@ class TestIRMSimulation:
         idx_end_pulse = np.argmin(np.abs(result.time - 40e-6))
         n_ar_pulse_end = result.density("Ar_c")[idx_end_pulse]
         assert n_ar_pulse_end < n_ar_start  # Gas rarefaction
+
+    def test_hot_population_grows_during_pulse(self, irm):
+        result = irm.run()
+        peak_hot = result.density("e_hot").max()
+        assert peak_hot > result.density("e_hot")[0]
+
+    def test_circuit_current_builds_during_pulse(self, irm):
+        result = irm.run()
+        peak_current = result.current_a.max()
+        assert peak_current > result.current_a[0]

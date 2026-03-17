@@ -161,6 +161,36 @@ class TestSubstrateCollector:
         assert radial.shape == (5,)
         assert np.any(radial > 0.0)
 
+    def test_merges_species_records_with_same_time(self, ion_species):
+        collector = SubstrateCollector(z_plane=0.09, dz_capture=0.01)
+        speed = np.sqrt(2.0 * 50.0 * E_CHARGE / ion_species.mass)
+
+        count_a = collector.record_particle_data(
+            r=np.array([0.01, 0.02]),
+            vr=np.zeros(2),
+            vz=np.full(2, speed),
+            vtheta=np.zeros(2),
+            weight=np.ones(2),
+            mass_kg=ion_species.mass,
+            t=1.0e-9,
+            species_name="Ar+",
+        )
+        count_b = collector.record_particle_data(
+            r=np.array([0.03]),
+            vr=np.zeros(1),
+            vz=np.full(1, speed),
+            vtheta=np.zeros(1),
+            weight=np.ones(1),
+            mass_kg=ion_species.mass,
+            t=1.0e-9,
+            species_name="Cu+",
+        )
+
+        assert collector.total_count == count_a + count_b
+        assert collector.latest_count() == count_a + count_b
+        assert collector.species_totals()["Ar+"] == count_a
+        assert collector.species_totals()["Cu+"] == count_b
+
 
 class TestCollisionTracker:
     def test_records(self):

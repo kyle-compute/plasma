@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import cupy as cp
 import numpy as np
 
 from plasma.live.contracts import LiveField2D
 from plasma.live.pic_window import EventWindow
 from plasma.pic.deposit import deposit_charge, deposit_number_density
+from plasma.runtime.cupy_compat import cp
 
 
 def field_bundle(

@@ -1,8 +1,8 @@
 """Diagnostics: energy distributions, spatial profiles, data collectors."""
 
 from plasma.diagnostics.bundles import (
-    DiagnosticSeriesBundle,
     DiagnosticsBundle,
+    DiagnosticSeriesBundle,
     DistributionBundle,
     bundle_from_irm_state,
 )

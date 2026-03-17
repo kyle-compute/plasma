@@ -28,7 +28,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from inspect import signature
 
-import cupy as cp
 import numpy as np
 
 from plasma.pic.boundaries import apply_boundaries
@@ -38,6 +37,8 @@ from plasma.pic.grid import CylindricalGrid
 from plasma.pic.particles import ParticleArray
 from plasma.pic.poisson import PoissonSolverCylindrical
 from plasma.pic.pusher import boris_push, electrostatic_push
+from plasma.runtime.cupy_compat import cp
+from plasma.runtime.random import export_rng_state
 
 
 @dataclass
@@ -123,6 +124,29 @@ def _merge_event_clouds(target: dict[str, dict[str, np.ndarray]], name: str, clo
     target[name]["z"] = np.concatenate((target[name]["z"], z))
 
 
+def _capture_boundary_incident_particles(particles: ParticleArray, *, z_plane: float) -> dict[str, np.ndarray] | None:
+    """Capture alive particles that have crossed the substrate boundary."""
+
+    n = particles.count
+    if n == 0 or particles.species.charge_state <= 0:
+        return None
+
+    z = cp.asnumpy(particles.z[:n])
+    alive = cp.asnumpy(particles.alive[:n])
+    mask = (alive == 1) & (z >= z_plane)
+    if not np.any(mask):
+        return None
+
+    return {
+        "r": cp.asnumpy(particles.r[:n][mask]),
+        "z": z[mask],
+        "vr": cp.asnumpy(particles.vr[:n][mask]),
+        "vz": cp.asnumpy(particles.vz[:n][mask]),
+        "vtheta": cp.asnumpy(particles.vtheta[:n][mask]),
+        "weight": cp.asnumpy(particles.weight[:n][mask]),
+    }
+
+
 def _invoke_callback(callback: Callable, step: int, t: float, phi: cp.ndarray, species_list: list[ParticleArray], stats: dict) -> None:
     """Call the callback with backwards-compatible argument count."""
 
@@ -201,6 +225,7 @@ def pic_step(
     n_see = 0
     n_sputtered = 0
     n_impacts = 0
+    substrate_incident: dict[str, dict[str, np.ndarray]] = {}
     if target is not None:
         from plasma.pic.magnetron import process_target_impacts
 
@@ -208,7 +233,7 @@ def pic_step(
         for particles in species_list:
             if particles.species.charge_state <= 0:
                 continue
-            result = process_target_impacts(target, particles, grid)
+            result = process_target_impacts(target, particles, grid, rng=rng)
             n_impacts += result["n_impacts"]
             _merge_event_clouds(event_clouds, "target_impacts", result.get("impact_positions"))
 
@@ -232,6 +257,12 @@ def pic_step(
     stats["n_sputtered"] = n_sputtered
     stats["n_target_impacts"] = n_impacts
 
+    for particles in species_list:
+        incident = _capture_boundary_incident_particles(particles, z_plane=grid.z_max)
+        if incident is not None:
+            substrate_incident[particles.species.name] = incident
+    stats["substrate_incident"] = substrate_incident
+
     # 6. Apply boundaries
     if target is not None:
         from plasma.pic.magnetron import apply_magnetron_boundaries
@@ -243,6 +274,7 @@ def pic_step(
 
     # 7. MCC collisions
     collision_counts: dict[str, int] = {}
+    collision_weight_sums: dict[str, float] = {}
     if mcc_handlers is not None and species_map is not None:
         if rng is None:
             rng = cp.random.RandomState()
@@ -255,6 +287,9 @@ def pic_step(
             counts = handler.perform_collisions(particles, dt, rng=rng)
             for k, v in counts.items():
                 collision_counts[k] = collision_counts.get(k, 0) + v
+            if hasattr(handler, "get_collision_weight_sums"):
+                for k, v in handler.get_collision_weight_sums().items():
+                    collision_weight_sums[k] = collision_weight_sums.get(k, 0.0) + float(v)
             for name, cloud in handler.get_event_positions().items():
                 _merge_event_clouds(event_clouds, name, cloud)
 
@@ -265,15 +300,21 @@ def pic_step(
                 if electron_arr is not None:
                     _inject_particles(electron_arr, new_electrons)
 
-            new_ions = handler.get_new_ions()
-            if new_ions is not None:
-                # Find the ion species this handler produces
-                for proc in handler.processes:
-                    if proc.product_ion_name and proc.product_ion_name in species_map:
-                        _inject_particles(species_map[proc.product_ion_name], new_ions)
-                        break
+            if hasattr(handler, "get_new_ions_by_species"):
+                for ion_name, ion_data in handler.get_new_ions_by_species().items():
+                    if ion_name in species_map:
+                        _inject_particles(species_map[ion_name], ion_data)
+            else:
+                new_ions = handler.get_new_ions()
+                if new_ions is not None:
+                    # Backwards-compatible single-ion fallback.
+                    for proc in handler.processes:
+                        if proc.product_ion_name and proc.product_ion_name in species_map:
+                            _inject_particles(species_map[proc.product_ion_name], new_ions)
+                            break
 
     stats["collision_counts"] = collision_counts
+    stats["collision_weight_sums"] = collision_weight_sums
     stats["event_clouds"] = event_clouds
 
     return phi, stats
@@ -301,6 +342,8 @@ def run_pic(
     rng=None,
     checkpoint_interval: int = 0,
     checkpoint_path: str | None = None,
+    checkpoint_background_state: dict[str, float] | None = None,
+    checkpoint_metadata: dict | None = None,
 ) -> PICDiagnostics:
     """Run the full PIC time loop.
 
@@ -322,6 +365,8 @@ def run_pic(
         rng: CuPy RandomState for reproducibility.
         checkpoint_interval: Save checkpoint every N steps (0 = disabled).
         checkpoint_path: Directory for checkpoint files.
+        checkpoint_background_state: Optional background reservoir state to persist with checkpoints.
+        checkpoint_metadata: Optional metadata persisted into checkpoints.
 
     Returns:
         PICDiagnostics with time-series data.
@@ -369,6 +414,9 @@ def run_pic(
                     step, t, grid,
                     {sp.species.name: sp for sp in species_list},
                     phi, Br_grid, Bz_grid,
+                    background_state=checkpoint_background_state,
+                    metadata=checkpoint_metadata,
+                    rng_state=export_rng_state(rng),
                 )
             except ImportError:
                 pass

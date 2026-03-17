@@ -45,6 +45,11 @@ def ion_species():
     return Species(name="Ar+", charge=E_CHARGE, mass=M_AR, charge_state=1)
 
 
+@pytest.fixture
+def cu_ion_species():
+    return Species(name="Cu+", charge=E_CHARGE, mass=63.546 * 1.66053906660e-27, charge_state=1)
+
+
 class TestMagnetronTarget:
     def test_on_target_check(self, target):
         """Points within erosion zone should be detected."""
@@ -159,6 +164,44 @@ class TestSEE:
 
 
 class TestSputtering:
+    def test_species_specific_target_models_apply_to_cu_ions(self, grid, cu_ion_species):
+        target = MagnetronTarget(
+            z_target=0.0,
+            r_inner=0.015,
+            r_outer=0.035,
+            see_yield=0.0,
+            sputter_yield=None,
+            species_see_yields={"Cu+": 1.0},
+            species_sputter_yields={
+                "Cu+": SputterYield(
+                    ion="Cu+",
+                    target="Cu",
+                    a=0.0691,
+                    b=0.556,
+                    threshold_ev=20.0,
+                    cohesive_energy_ev=3.49,
+                )
+            },
+        )
+
+        ions = ParticleArray(species=cu_ion_species)
+        ions.allocate(100)
+        v_200ev = np.sqrt(2.0 * 200.0 * E_CHARGE / cu_ion_species.mass)
+        ions.add_particles(
+            r=np.full(30, 0.025),
+            z=np.full(30, -1.0e-4),
+            vr=np.zeros(30),
+            vz=np.full(30, -v_200ev),
+            vtheta=np.zeros(30),
+            weight=np.ones(30),
+        )
+
+        result = process_target_impacts(target, ions, grid)
+        assert result["see_electrons"] is not None
+        assert len(result["see_electrons"]["r"]) > 0
+        assert result["sputtered_neutrals"] is not None
+        assert len(result["sputtered_neutrals"]["r"]) > 0
+
     def test_sputtering_produces_neutrals(self, grid, target, ion_species):
         """Ion impacts should produce sputtered neutral atoms."""
         n = 500

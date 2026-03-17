@@ -1,0 +1,61 @@
+package:
+  name: "gudmundsson_cu_ar_case1"
+  version: "2026.03"
+  benchmark: "Gudmundsson 2022 Case I"
+  material_system: "Cu/Ar"
+  notes: "Literature-fit Cu/Ar HiPIMS benchmark package for the global model."
+
+inputs:
+  - name: "case1_waveform"
+    kind: "waveform"
+    path: "../waveforms/cu_ar_case1_literature_fit.csv"
+    provenance: "literature-fit"
+    citation: "Literature-shaped waveform for Gudmundsson Case I; not a raw measured trace."
+  - name: "gudmundsson_cu_ar_reactions"
+    kind: "reaction_set"
+    path: "../reactions/gudmundsson_cu_ar.yaml"
+    provenance: "literature-fit"
+    citation: "Gudmundsson et al., Surf. Coat. Technol. 442 (2022) 128189."
+  - name: "yamamura_yields"
+    kind: "yield_model"
+    path: "../sputtering/yamamura_yields.yaml"
+    provenance: "literature-fit"
+    citation: "Yamamura sputter-yield fit parameters."
+
+global:
+  reactions_file: "../reactions/gudmundsson_cu_ar.yaml"
+  pulse:
+    waveform_file: "../waveforms/cu_ar_case1_literature_fit.csv"
+  circuit:
+    mode: "rl"
+    series_resistance_ohm: 5.5
+    series_inductance_h: 12.0e-6
+    plasma_resistance_floor_ohm: 0.5
+    plasma_resistance_ceiling_ohm: 400.0
+    electron_neutral_collision_hz: 4.0e7
+    electron_conductivity_scale: 1.0
+  validation:
+    suite_name: "gudmundsson_case1_global"
+    targets:
+      - name: "peak discharge current"
+        metric: "peak_current_a"
+        lower: 35.0
+        upper: 65.0
+        unit: "A"
+        citation: "Gudmundsson Case I reports peak current in the 40-60 A range."
+      - name: "current rmse"
+        metric: "current_rmse_a"
+        upper: 18.0
+        unit: "A"
+        citation: "Circuit-model current should stay within a literature-fit error band."
+      - name: "current peak ratio"
+        metric: "current_peak_ratio"
+        lower: 0.65
+        upper: 1.35
+        unit: "1"
+        citation: "Circuit-model peak current should stay near the literature-fit reference peak."
+      - name: "current peak timing"
+        metric: "current_peak_time_error_us"
+        upper: 30.0
+        unit: "us"
+        citation: "Circuit-model peak should occur within the same pulse window as the reference."

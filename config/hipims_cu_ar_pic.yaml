@@ -3,6 +3,8 @@
 
 name: "hipims_cu_ar_pic"
 model: "pic"
+mode: "smoke"
+material_package: "data/material_packages/cu_ar_public_v1.yaml"
 
 geometry:
   r_target: 0.050        # 100 mm diameter target
@@ -27,8 +29,11 @@ target:
   cohesive_energy_ev: 3.49
   sputter_yield_a: 0.1421
   sputter_yield_b: 0.468
+  self_sputter_yield_a: 0.0691
+  self_sputter_yield_b: 0.556
   sputter_threshold_ev: 20.0
   secondary_electron_yield: 0.1
+  metal_ion_secondary_electron_yield: 0.08
   see_energy_ev: 3.0
 
 pulse:
@@ -41,6 +46,8 @@ particles:
   ppc: 50                # Particles per cell
   n0_electron: 1.0e+15   # Initial electron density [m^-3]
   n0_ion: 1.0e+15        # Initial ion density [m^-3]
+  n0_metal_ion: 0.0
+  n0_sputtered_neutral: 5.0e+15
   te_ev: 3.0             # Initial electron temperature [eV]
   ti_ev: 0.1             # Initial ion temperature [eV]
 
@@ -50,6 +57,14 @@ magnetic_field:
   magnet_z: -0.005
   current_inner: 1000.0
   current_outer: -600.0
+
+collision_package: "data/collision_packages/cu_ar_smoke_v1.yaml"
+
+background_model:
+  densities_m3:
+    Cu: 5.0e+17
+    Ar_m: 5.0e+15
+    Ar_r: 5.0e+15
 
 time:
   dt: 5.0e-12            # Timestep [s]
@@ -73,6 +88,11 @@ case:
       kind: "cross_sections"
       provenance: "synthetic"
       citation: "Synthetic MCC cross sections bundled in source code."
+    - name: "cu_ar_smoke_collision_package"
+      kind: "collision_package"
+      path: "data/collision_packages/cu_ar_smoke_v1.yaml"
+      provenance: "synthetic"
+      citation: "Package-driven synthetic Cu/Ar collision registry for smoke runs."
     - name: "analytic_magnetron_field"
       kind: "magnetic_field"
       provenance: "heuristic"

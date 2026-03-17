@@ -25,9 +25,6 @@ SERIES_COLORS = {
     "excitation_collisions": "#7ae582",
     "ionization_collisions": "#ffe66d",
     "charge_exchange_collisions": "#c77dff",
-    "target_impacts_window": "#ff6b6b",
-    "see_window": "#9bf6ff",
-    "sputtered_window": "#f4a261",
 }
 
 SPECIES_COLORS = {

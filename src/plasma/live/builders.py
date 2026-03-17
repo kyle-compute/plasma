@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import time
 
-import cupy as cp
 import numpy as np
 
 from plasma.core.constants import E_CHARGE
 from plasma.global_model.irm import IRMState
-from plasma.live.contracts import LiveGeometry, LiveHistogram, LiveParticleCloud, LiveSeries, LiveSnapshot
+from plasma.live.contracts import (
+    LiveGeometry,
+    LiveHistogram,
+    LiveParticleCloud,
+    LiveSeries,
+    LiveSnapshot,
+)
 from plasma.live.hipims_monitor import monitor_message, peak_radius_m, pulse_phase_label, safe_ratio
 from plasma.live.pic_fields import (
     charge_density_view,
@@ -23,6 +28,7 @@ from plasma.live.pic_fields import (
     substrate_flux_proxy,
 )
 from plasma.live.pic_window import EventWindow, event_counts
+from plasma.runtime.cupy_compat import cp
 
 _GLOBAL_SERIES_META = {
     "current_a": ("s", "A", "Discharge current"),
@@ -40,6 +46,7 @@ _PIC_SERIES_META = {
     "target_voltage_v": ("s", "V", "Target voltage"),
     "electron_particles": ("s", "count", "Electron particles"),
     "ar_ion_particles": ("s", "count", "Ar+ particles"),
+    "metal_neutral_particles": ("s", "count", "Target-metal neutrals"),
     "cu_neutral_particles": ("s", "count", "Cu particles"),
     "substrate_hits_total": ("s", "count", "Substrate ion samples"),
     "electron_mean_energy_ev": ("s", "eV", "Electron mean energy"),
@@ -60,6 +67,18 @@ _PIC_SERIES_META = {
     "substrate_mean_energy_ev": ("s", "eV", "Substrate mean ion energy"),
     "racetrack_peak_r_m": ("s", "m", "Racetrack peak radius"),
 }
+
+
+def _metal_species_name(species_map: dict) -> str | None:
+    for name, particles in species_map.items():
+        if name == "electron":
+            continue
+        if particles.species.charge_state != 0:
+            continue
+        if name.startswith("Ar"):
+            continue
+        return name
+    return None
 
 
 def build_global_live_snapshot(
@@ -139,11 +158,23 @@ def build_pic_live_snapshot(
             ion_density, x=grid.z_edges, y=grid.r_edges, unit="m^-3", label="Ar+ density"
         )
 
-    neutrals = species_map.get("Cu")
-    if neutrals is not None:
-        cu_density = number_density_view(grid, neutrals)
-        fields["cu_density_m3"] = field_bundle(
-            cu_density, x=grid.z_edges, y=grid.r_edges, unit="m^-3", label="Cu density"
+    metal_species_name = _metal_species_name(species_map)
+    neutrals = species_map.get(metal_species_name) if metal_species_name is not None else None
+    if neutrals is not None and metal_species_name is not None:
+        metal_density = number_density_view(grid, neutrals)
+        fields["metal_density_m3"] = field_bundle(
+            metal_density,
+            x=grid.z_edges,
+            y=grid.r_edges,
+            unit="m^-3",
+            label=f"{metal_species_name} density",
+        )
+        fields[f"{metal_species_name.lower()}_density_m3"] = field_bundle(
+            metal_density,
+            x=grid.z_edges,
+            y=grid.r_edges,
+            unit="m^-3",
+            label=f"{metal_species_name} density",
         )
 
     fields["rho_c_m3"] = field_bundle(
@@ -205,7 +236,10 @@ def build_pic_live_snapshot(
         )
 
     particles: dict[str, LiveParticleCloud] = {}
-    for species_name in ("electron", "Ar+", "Cu"):
+    particle_species = ["electron", "Ar+"]
+    if metal_species_name is not None:
+        particle_species.append(metal_species_name)
+    for species_name in particle_species:
         particle_array = species_map.get(species_name)
         if particle_array is None:
             continue

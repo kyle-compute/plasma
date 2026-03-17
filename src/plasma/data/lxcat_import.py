@@ -110,7 +110,10 @@ def _write_table(
     sigma_total = np.zeros_like(energy_grid)
     for table in tables:
         sigma_total += table(energy_grid)
-    content = ["# energy_eV sigma_m2"] + [f"{e:.8e} {s:.8e}" for e, s in zip(energy_grid, sigma_total)]
+    content = [
+        "# energy_eV sigma_m2",
+        *[f"{e:.8e} {s:.8e}" for e, s in zip(energy_grid, sigma_total, strict=False)],
+    ]
     path.write_text("\n".join(content) + "\n")
     return LXCatNormalizedFile(
         name=path.stem,

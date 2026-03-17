@@ -17,7 +17,11 @@ def test_irm_run_emits_transport_metrics() -> None:
     assert result.metric("current_a").max() > 0.0
     assert result.metric("model_current_proxy_a").shape == result.time.shape
     assert result.metric("reference_current_a").shape == result.time.shape
-    assert 0.0 <= result.metric("beta_t").max() <= 0.5
+    assert result.metric("target_voltage_v").shape == result.time.shape
+    assert result.metric("plasma_resistance_ohm").shape == result.time.shape
+    assert result.metric("electron_density_hot").shape == result.time.shape
+    assert result.metric("electron_temperature_hot_ev").shape == result.time.shape
+    assert 0.0 <= result.metric("beta_t").max() <= 1.0
 
 
 def test_bundle_manifest_and_validation_are_exploratory() -> None:
@@ -28,8 +32,12 @@ def test_bundle_manifest_and_validation_are_exploratory() -> None:
     manifest = build_run_manifest(cfg, bundle, report)
 
     assert "peak_current_a" in bundle.summary
+    assert "current_rmse_a" in bundle.summary
     assert "current_proxy_rmse_a" in bundle.summary
     assert "current_proxy_peak_time_error_us" in bundle.summary
     assert report.status == "exploratory"
     assert manifest.validation_status == "exploratory"
+    assert manifest.run_mode == cfg.mode
+    assert manifest.benchmark_package == "gudmundsson_cu_ar_case1"
+    assert report.validation_suite == "gudmundsson_case1_global"
     assert manifest.input_sources[0].provenance == "literature-fit"

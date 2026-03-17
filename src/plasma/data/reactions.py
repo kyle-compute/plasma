@@ -66,11 +66,27 @@ class Reaction:
         return self.reaction_type == "ionization"
 
 
+@dataclass(frozen=True)
+class ChemistrySpecies:
+    """Tracked species metadata bundled with a chemistry package."""
+
+    symbol: str
+    family: str
+    charge: int
+    population: str | None = None
+    role: str | None = None
+    energy_level_ev: float = 0.0
+    metastable: bool = False
+
+
 @dataclass
 class ReactionSet:
     """Collection of all reactions for a discharge chemistry."""
 
     reactions: dict[str, Reaction] = field(default_factory=dict)
+    package_name: str = ""
+    source: str = ""
+    species: tuple[ChemistrySpecies, ...] = ()
 
     def __getitem__(self, key: str) -> Reaction:
         return self.reactions[key]
@@ -84,6 +100,16 @@ class ReactionSet:
     @property
     def ids(self) -> list[str]:
         return list(self.reactions.keys())
+
+    @property
+    def species_order(self) -> tuple[str, ...]:
+        return tuple(species.symbol for species in self.species)
+
+    def species_metadata(self, symbol: str) -> ChemistrySpecies:
+        for species in self.species:
+            if species.symbol == symbol:
+                return species
+        raise KeyError(f"Species '{symbol}' not found in chemistry package")
 
     def by_type(self, reaction_type: str) -> list[Reaction]:
         return [r for r in self if r.reaction_type == reaction_type]
@@ -135,4 +161,23 @@ def load_reactions(path: str | Path) -> ReactionSet:
             rate_constant=rate_const,
         )
 
-    return ReactionSet(reactions=reactions)
+    metadata = data.get("metadata", {})
+    species = tuple(
+        ChemistrySpecies(
+            symbol=item["symbol"],
+            family=item["family"],
+            charge=int(item["charge"]),
+            population=item.get("population"),
+            role=item.get("role"),
+            energy_level_ev=float(item.get("energy_level_ev", 0.0)),
+            metastable=bool(item.get("metastable", False)),
+        )
+        for item in data.get("species", [])
+    )
+
+    return ReactionSet(
+        reactions=reactions,
+        package_name=metadata.get("package", path.stem),
+        source=metadata.get("source", ""),
+        species=species,
+    )

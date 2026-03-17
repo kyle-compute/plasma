@@ -1,0 +1,123 @@
+package:
+  name: "cu_ar_smoke_v1"
+  version: "2026.03"
+  material_system: "Cu/Ar"
+  notes: "Package-driven Cu/Ar smoke collision set with synthetic Cu and Ar channels."
+
+species:
+  - name: "electron"
+    role: "kinetic"
+    charge_state: -1
+    mass_kg: 9.1093837015e-31
+  - name: "Ar+"
+    role: "kinetic"
+    charge_state: 1
+    mass_kg: 6.633521465546082e-26
+  - name: "Cu"
+    role: "kinetic"
+    charge_state: 0
+    mass_kg: 1.055206448824836e-25
+  - name: "Cu+"
+    role: "kinetic"
+    charge_state: 1
+    mass_kg: 1.055206448824836e-25
+  - name: "Ar_c"
+    role: "background"
+    charge_state: 0
+    mass_kg: 6.633521465546082e-26
+  - name: "Ar_m"
+    role: "background"
+    charge_state: 0
+    mass_kg: 6.633521465546082e-26
+  - name: "Ar_r"
+    role: "background"
+    charge_state: 0
+    mass_kg: 6.633521465546082e-26
+  - name: "Cu_m1"
+    role: "background"
+    charge_state: 0
+    mass_kg: 1.055206448824836e-25
+  - name: "Cu_m2"
+    role: "background"
+    charge_state: 0
+    mass_kg: 1.055206448824836e-25
+  - name: "Cu_ex"
+    role: "background"
+    charge_state: 0
+    mass_kg: 1.055206448824836e-25
+
+channels:
+  - name: "e_Ar_c_elastic"
+    projectile: "electron"
+    background: "Ar_c"
+    process: "elastic"
+    execution: "mcc"
+    builtin_cross_section: "electron_ar_elastic"
+    provenance: "synthetic"
+    citation: "Synthetic electron-Ar elastic cross section."
+  - name: "e_Ar_c_excitation"
+    projectile: "electron"
+    background: "Ar_c"
+    process: "excitation"
+    execution: "mcc"
+    threshold_ev: 11.55
+    product_species_name: "Ar_m"
+    builtin_cross_section: "electron_ar_excitation"
+    provenance: "synthetic"
+    citation: "Synthetic electron-Ar excitation cross section."
+  - name: "e_Ar_c_ionization"
+    projectile: "electron"
+    background: "Ar_c"
+    process: "ionization"
+    execution: "mcc"
+    threshold_ev: 15.76
+    product_species_name: "electron"
+    product_ion_name: "Ar+"
+    builtin_cross_section: "electron_ar_ionization"
+    provenance: "synthetic"
+    citation: "Synthetic electron-Ar ionization cross section."
+  - name: "e_Cu_ground_excitation"
+    projectile: "electron"
+    background: "Cu"
+    process: "excitation"
+    execution: "mcc"
+    threshold_ev: 3.79
+    product_species_name: "Cu_ex"
+    builtin_cross_section: "electron_cu_excitation"
+    provenance: "synthetic"
+    citation: "Synthetic electron-Cu excitation cross section."
+  - name: "e_Cu_ground_ionization"
+    projectile: "electron"
+    background: "Cu"
+    process: "ionization"
+    execution: "mcc"
+    threshold_ev: 7.726
+    product_species_name: "electron"
+    product_ion_name: "Cu+"
+    builtin_cross_section: "electron_cu_ionization"
+    provenance: "synthetic"
+    citation: "Synthetic electron-Cu ionization cross section."
+  - name: "Ar+_Ar_c_cx"
+    projectile: "Ar+"
+    background: "Ar_c"
+    process: "charge_exchange"
+    execution: "mcc"
+    builtin_cross_section: "ion_ar_charge_exchange"
+    provenance: "synthetic"
+    citation: "Synthetic Ar+-Ar charge-exchange cross section."
+  - name: "Ar+_Cu_cx"
+    projectile: "Ar+"
+    background: "Cu"
+    process: "charge_exchange"
+    execution: "mcc"
+    builtin_cross_section: "ion_cu_charge_exchange"
+    provenance: "synthetic"
+    citation: "Synthetic Ar+-Cu charge-exchange cross section."
+  - name: "Ar_m_Cu_penning"
+    projectile: "Ar_m"
+    background: "Cu"
+    process: "penning"
+    execution: "background_rate"
+    product_ion_name: "Cu+"
+    provenance: "model-derived"
+    citation: "Background-only Penning placeholder for future Cu/Ar chemistry coupling."

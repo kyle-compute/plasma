@@ -3,11 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from plasma.diagnostics.collectors import SubstrateCollector
-from plasma.live.contracts import LiveGeometry
 from plasma.core.config import load_config
+from plasma.diagnostics.collectors import SubstrateCollector
 from plasma.global_model.irm import IRM
 from plasma.live.builders import build_global_live_snapshot, build_pic_live_snapshot
+from plasma.live.contracts import LiveGeometry
 from plasma.live.publisher import FileLiveSession, LiveCommandWriteError
 from plasma.pic.grid import CylindricalGrid
 from plasma.pic.particles import ParticleArray, Species

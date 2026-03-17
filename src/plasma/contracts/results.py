@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from plasma.contracts.cases import InputSource, Provenance
+from plasma.contracts.cases import InputSource, Provenance, RunMode
 
 
 class MetricSummary(BaseModel):
@@ -36,6 +36,8 @@ class ValidationReport(BaseModel):
     """Validation status for a run against configured targets."""
 
     case_name: str
+    benchmark_package: str | None = None
+    validation_suite: str | None = None
     status: Literal["validated", "exploratory", "failed", "not_validated"]
     results: list[ValidationResult] = Field(default_factory=list)
 
@@ -45,7 +47,10 @@ class RunManifest(BaseModel):
 
     case_name: str
     model: Literal["global", "pic"]
+    run_mode: RunMode
     config_path: str
+    benchmark_package: str | None = None
+    validation_suite: str | None = None
     input_sources: list[InputSource] = Field(default_factory=list)
     outputs: dict[str, str] = Field(default_factory=dict)
     metrics: dict[str, MetricSummary] = Field(default_factory=dict)

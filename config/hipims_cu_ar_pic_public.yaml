@@ -1,7 +1,9 @@
-# HiPIMS PIC-MCC configuration: Cu target in Ar with public-download electron cross sections
+# HiPIMS PIC-MCC configuration: exploratory Cu/Ar public-data case
 
 name: "hipims_cu_ar_pic_public"
 model: "pic"
+mode: "benchmark"
+material_package: "data/material_packages/cu_ar_public_v1.yaml"
 
 geometry:
   r_target: 0.050
@@ -26,8 +28,11 @@ target:
   cohesive_energy_ev: 3.49
   sputter_yield_a: 0.1421
   sputter_yield_b: 0.468
+  self_sputter_yield_a: 0.0691
+  self_sputter_yield_b: 0.556
   sputter_threshold_ev: 20.0
   secondary_electron_yield: 0.1
+  metal_ion_secondary_electron_yield: 0.08
   see_energy_ev: 3.0
 
 pulse:
@@ -41,6 +46,8 @@ particles:
   ppc: 50
   n0_electron: 1.0e+15
   n0_ion: 1.0e+15
+  n0_metal_ion: 0.0
+  n0_sputtered_neutral: 1.0e+15
   te_ev: 3.0
   ti_ev: 0.1
 
@@ -59,6 +66,14 @@ cross_sections:
   ionization_file: "data/cross_sections/lxcat_biagi_e_ar/electron_ar_ionization.tsv"
   manifest_file: "data/cross_sections/lxcat_biagi_e_ar/manifest.json"
 
+collision_package: "data/collision_packages/cu_ar_public_v1.yaml"
+
+background_model:
+  densities_m3:
+    Cu: 1.0e+17
+    Ar_m: 1.0e+14
+    Ar_r: 1.0e+14
+
 time:
   dt: 5.0e-12
   n_steps: 10000
@@ -70,7 +85,7 @@ output:
   dir: "output/pic/hipims_cu_ar_pic_public"
 
 case:
-  benchmark: "Public-data Cu/Ar PIC benchmark"
+  benchmark: "Exploratory public-data Cu/Ar PIC case"
   material_system: "Cu/Ar"
   inputs:
     - name: "gudmundsson_case1_waveform"
@@ -83,18 +98,24 @@ case:
       path: "data/cross_sections/LXCat_Biagi_e_Ar.zip"
       provenance: "public-download"
       citation: "Biagi database, LXCat, retrieved March 16, 2026."
+    - name: "cu_ar_public_collision_package"
+      kind: "collision_package"
+      path: "data/collision_packages/cu_ar_public_v1.yaml"
+      provenance: "synthetic"
+      citation: "Versioned Cu/Ar collision registry combining public electron-Ar data with synthetic Cu fallback channels."
     - name: "surrogate_magnetron_field"
       kind: "magnetic_field"
       path: "data/field_maps/hipims_cu_ar_pic_surrogate.npz"
       provenance: "surrogate"
       citation: "Field map generated from the analytic current-loop magnetron model."
-  notes: "Electron-Ar MCC comes from public LXCat data; waveform is literature-fit; magnetic field remains surrogate."
+  notes: "Electron-Ar MCC comes from public LXCat data; Cu channels still use synthetic fallback cross sections and the magnetic field remains surrogate, so this case is exploratory rather than validation-grade."
 
 validation:
+  suite_name: "public_cu_ar_pic_sanity"
   targets:
     - name: "peak target voltage"
       metric: "peak_target_voltage_v"
       lower: 580.0
       upper: 650.0
       unit: "V"
-      citation: "Sanity check for the public benchmark pulse amplitude."
+      citation: "Sanity check for the configured public-data pulse amplitude; not a full physics benchmark."

@@ -73,6 +73,32 @@ def electron_ar_ionization() -> CrossSectionTable:
     return CrossSectionTable(e, s, name="e_Ar_ionization_synthetic")
 
 
+def electron_cu_excitation() -> CrossSectionTable:
+    """e + Cu -> Cu* + e: approximate low-threshold excitation curve."""
+    e = np.array([
+        3.79, 4.0, 5.0, 7.0, 10.0, 15.0, 20.0, 30.0,
+        50.0, 80.0, 120.0, 200.0, 500.0, 1000.0,
+    ])
+    s = np.array([
+        1e-25, 4e-22, 2e-21, 8e-21, 1.6e-20, 2.0e-20, 1.8e-20, 1.3e-20,
+        8e-21, 5e-21, 3.5e-21, 2e-21, 7e-22, 3e-22,
+    ])
+    return CrossSectionTable(e, s, name="e_Cu_excitation_synthetic")
+
+
+def electron_cu_ionization() -> CrossSectionTable:
+    """e + Cu -> Cu+ + 2e: approximate synthetic ionization curve."""
+    e = np.array([
+        7.726, 7.8, 8.0, 9.0, 10.0, 12.0, 15.0, 20.0,
+        30.0, 50.0, 80.0, 120.0, 200.0, 500.0, 1000.0,
+    ])
+    s = np.array([
+        1e-25, 2e-23, 2e-22, 1e-21, 3e-21, 7e-21, 1.2e-20, 1.8e-20,
+        2.1e-20, 2.0e-20, 1.7e-20, 1.3e-20, 8e-21, 3e-21, 1e-21,
+    ])
+    return CrossSectionTable(e, s, name="e_Cu_ionization_synthetic")
+
+
 def ion_ar_charge_exchange() -> CrossSectionTable:
     """Ar+ + Ar -> Ar + Ar+: resonant CX, ~4e-19 m^2, slowly decreasing."""
     e = np.array([
@@ -84,3 +110,16 @@ def ion_ar_charge_exchange() -> CrossSectionTable:
         2.0e-19, 1.5e-19, 1.2e-19, 7e-20,
     ])
     return CrossSectionTable(e, s, name="ion_Ar_CX_synthetic")
+
+
+def ion_cu_charge_exchange() -> CrossSectionTable:
+    """Ar+ + Cu -> Ar + Cu+: approximate synthetic charge exchange."""
+    e = np.array([
+        0.01, 0.1, 1.0, 5.0, 10.0, 50.0, 100.0,
+        200.0, 500.0, 1000.0, 5000.0,
+    ])
+    s = np.array([
+        3.5e-19, 3.4e-19, 3.3e-19, 3.0e-19, 2.8e-19, 2.3e-19, 2.0e-19,
+        1.6e-19, 1.2e-19, 9e-20, 5e-20,
+    ])
+    return CrossSectionTable(e, s, name="ion_Cu_CX_synthetic")

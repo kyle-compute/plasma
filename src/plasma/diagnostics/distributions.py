@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import cupy as cp
 import numpy as np
 from numpy.typing import NDArray
 
 from plasma.core.constants import E_CHARGE
+from plasma.runtime.cupy_compat import cp
 
 
 def compute_iedf(

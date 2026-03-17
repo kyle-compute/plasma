@@ -1,4 +1,4 @@
-"""Monte Carlo Collisions (MCC) — hybrid CPU/GPU prototype.
+"""Monte Carlo Collisions (MCC) for PIC projectiles against background species.
 
 Null-collision scheme loosely following Vahedi & Surendra (1995) and
 Taccogna 2023 Eq. 5.  Candidate selection (step 1) runs on GPU via
@@ -26,9 +26,8 @@ Collision types supported:
     - Charge exchange (ion velocity replaced by thermal neutral velocity)
 
 Limitations:
-    - CPU-side collision physics uses unseeded np.random.default_rng()
-      inside each method; the CuPy RNG passed to perform_collisions()
-      controls only candidate selection, not scattering angles.
+    - This remains a null-collision approximation with static background
+      reservoirs; it is not a full heavy-species transport solver.
     - Ionization products are accumulated in lists per perform_collisions()
       call, but are overwritten across successive calls — caller must
       retrieve via get_new_electrons()/get_new_ions() before the next call.
@@ -44,11 +43,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-import cupy as cp
 import numpy as np
 
 from plasma.core.constants import E_CHARGE, M_ELECTRON
 from plasma.data.cross_sections import CrossSectionTable
+from plasma.runtime.cupy_compat import cp
+from plasma.runtime.random import SimulationRNG, uniform_cpu
 
 
 class CollisionType(Enum):
@@ -91,10 +91,9 @@ def _concat_particle_dicts(buffers: list[dict[str, np.ndarray]]) -> dict[str, np
 class MCCHandler:
     """Null-collision MCC handler for one projectile vs. one background species.
 
-    Hybrid CPU/GPU prototype: candidate selection on GPU (CuPy RNG),
-    accept/reject and scattering physics on CPU (NumPy RNG).  The CPU-side
-    RNG is *not* seeded by the caller — reproducibility is limited to
-    which particles are selected as collision candidates.
+    Candidate selection can run on GPU-backed arrays, while collision
+    scattering is sampled on CPU using the same shared RNG object so
+    checkpoint/restart and repeated seeds remain deterministic.
 
     Attributes:
         projectile_mass: Mass of projectile species [kg].
@@ -170,7 +169,7 @@ class MCCHandler:
         self,
         particles,
         dt: float,
-        rng: cp.random.RandomState | None = None,
+        rng=None,
     ) -> dict[str, int]:
         """Perform MCC collisions on all particles of this species.
 
@@ -183,12 +182,13 @@ class MCCHandler:
             Dict of collision counts by process name.
         """
         if rng is None:
-            rng = cp.random.RandomState()
+            rng = SimulationRNG()
 
         # Clear ionization product buffers from any prior call
         self._new_electron_buffers = []
-        self._new_ion_buffers = []
+        self._new_ion_buffers_by_species = {}
         self._event_buffers = {}
+        self._weight_sums = {}
 
         n = particles.count
         if n == 0 or not self.processes:
@@ -226,8 +226,7 @@ class MCCHandler:
         processed = np.zeros(n_collide, dtype=bool)
 
         # Random number for accept/reject (CPU-side, unseeded)
-        cpu_rng = np.random.default_rng()
-        rand_type = cpu_rng.random(n_collide)
+        rand_type = uniform_cpu(rng, n_collide)
 
         cumulative_prob = np.zeros(n_collide)
 
@@ -258,12 +257,16 @@ class MCCHandler:
                 "r": cp.asnumpy(particles.r[cp.asarray(orig_idx)]),
                 "z": cp.asnumpy(particles.z[cp.asarray(orig_idx)]),
             }
+            self._weight_sums[proc.name] = float(
+                np.sum(cp.asnumpy(particles.weight[cp.asarray(orig_idx)]))
+            )
 
             # Apply collision
             n_events = self._apply_collision(
                 proc, particles, orig_idx,
                 energy_ev[collision_idx], v_mag[collision_idx],
                 vr[collision_idx], vz[collision_idx], vt[collision_idx],
+                rng=rng,
             )
             counts[proc.name] = n_events
             processed[collision_idx] = True
@@ -283,6 +286,8 @@ class MCCHandler:
         vr: np.ndarray,
         vz: np.ndarray,
         vt: np.ndarray,
+        *,
+        rng,
     ) -> int:
         """Apply a specific collision to selected particles.
 
@@ -293,13 +298,21 @@ class MCCHandler:
             return 0
 
         if process.collision_type == CollisionType.ELASTIC:
-            self._elastic_scatter(particles, indices, energy_ev, v_mag)
+            self._elastic_scatter(particles, indices, energy_ev, v_mag, rng=rng)
         elif process.collision_type == CollisionType.EXCITATION:
-            self._excitation(particles, indices, energy_ev, v_mag, process.threshold_ev)
+            self._excitation(particles, indices, energy_ev, v_mag, process.threshold_ev, rng=rng)
         elif process.collision_type == CollisionType.IONIZATION:
-            self._ionization(particles, indices, energy_ev, v_mag, process.threshold_ev)
+            self._ionization(
+                particles,
+                indices,
+                energy_ev,
+                v_mag,
+                process.threshold_ev,
+                product_ion_name=process.product_ion_name,
+                rng=rng,
+            )
         elif process.collision_type == CollisionType.CHARGE_EXCHANGE:
-            self._charge_exchange(particles, indices)
+            self._charge_exchange(particles, indices, rng=rng)
 
         return n
 
@@ -309,6 +322,8 @@ class MCCHandler:
         indices: np.ndarray,
         energy_ev: np.ndarray,
         v_mag: np.ndarray,
+        *,
+        rng,
     ) -> None:
         """Isotropic elastic scattering.
 
@@ -318,12 +333,10 @@ class MCCHandler:
         For ion-neutral: isotropic scattering in CM frame.
         """
         n = len(indices)
-        rng = np.random.default_rng()
-
         # Isotropic scattering: random direction, same speed
-        cos_theta = 2.0 * rng.random(n) - 1.0
+        cos_theta = 2.0 * uniform_cpu(rng, n) - 1.0
         sin_theta = np.sqrt(1.0 - cos_theta**2)
-        phi = 2.0 * np.pi * rng.random(n)
+        phi = 2.0 * np.pi * uniform_cpu(rng, n)
 
         # Energy loss for electrons: delta_E/E = 2*m_e/M per collision
         mass_ratio = self.projectile_mass / self.background_mass
@@ -346,6 +359,8 @@ class MCCHandler:
         energy_ev: np.ndarray,
         v_mag: np.ndarray,
         threshold_ev: float,
+        *,
+        rng,
     ) -> None:
         """Inelastic excitation: electron loses threshold energy.
 
@@ -353,16 +368,14 @@ class MCCHandler:
         Direction is randomized (isotropic).
         """
         n = len(indices)
-        rng = np.random.default_rng()
-
         # New kinetic energy after excitation
         new_energy_ev = np.maximum(energy_ev - threshold_ev, 0.01)
         new_speed = np.sqrt(2.0 * new_energy_ev * E_CHARGE / self.projectile_mass)
 
         # Isotropic post-collision direction
-        cos_theta = 2.0 * rng.random(n) - 1.0
+        cos_theta = 2.0 * uniform_cpu(rng, n) - 1.0
         sin_theta = np.sqrt(1.0 - cos_theta**2)
-        phi = 2.0 * np.pi * rng.random(n)
+        phi = 2.0 * np.pi * uniform_cpu(rng, n)
 
         idx_gpu = cp.asarray(indices)
         particles.vr[idx_gpu] = cp.asarray(new_speed * sin_theta * np.cos(phi))
@@ -376,6 +389,9 @@ class MCCHandler:
         energy_ev: np.ndarray,
         v_mag: np.ndarray,
         threshold_ev: float,
+        *,
+        product_ion_name: str | None,
+        rng,
     ) -> None:
         """Electron-impact ionization: incident e loses energy, new e + ion created.
 
@@ -385,17 +401,15 @@ class MCCHandler:
           (equal sharing is simplest; Opal-Peterson-Beaty for better physics)
         """
         n = len(indices)
-        rng = np.random.default_rng()
-
         # Remaining energy after ionization, split equally
         remaining_ev = np.maximum(energy_ev - threshold_ev, 0.01)
         share_ev = remaining_ev * 0.5
 
         # Scattered incident electron
         new_speed = np.sqrt(2.0 * share_ev * E_CHARGE / self.projectile_mass)
-        cos_theta = 2.0 * rng.random(n) - 1.0
+        cos_theta = 2.0 * uniform_cpu(rng, n) - 1.0
         sin_theta = np.sqrt(1.0 - cos_theta**2)
-        phi = 2.0 * np.pi * rng.random(n)
+        phi = 2.0 * np.pi * uniform_cpu(rng, n)
 
         idx_gpu = cp.asarray(indices)
         particles.vr[idx_gpu] = cp.asarray(new_speed * sin_theta * np.cos(phi))
@@ -404,9 +418,9 @@ class MCCHandler:
 
         # New ejected electron — born at same position, with remaining energy share
         ejected_speed = np.sqrt(2.0 * share_ev * E_CHARGE / self.projectile_mass)
-        cos_theta2 = 2.0 * rng.random(n) - 1.0
+        cos_theta2 = 2.0 * uniform_cpu(rng, n) - 1.0
         sin_theta2 = np.sqrt(1.0 - cos_theta2**2)
-        phi2 = 2.0 * np.pi * rng.random(n)
+        phi2 = 2.0 * np.pi * uniform_cpu(rng, n)
 
         # Get positions and weights of ionizing electrons
         r_new = cp.asnumpy(particles.r[idx_gpu])
@@ -436,14 +450,17 @@ class MCCHandler:
             "vtheta": np.zeros(n),
             "weight": w_new.copy(),
         }
-        if not hasattr(self, "_new_ion_buffers"):
-            self._new_ion_buffers = []
-        self._new_ion_buffers.append(ion_data)
+        if not hasattr(self, "_new_ion_buffers_by_species"):
+            self._new_ion_buffers_by_species = {}
+        ion_name = product_ion_name or "ion"
+        self._new_ion_buffers_by_species.setdefault(ion_name, []).append(ion_data)
 
     def _charge_exchange(
         self,
         particles,
         indices: np.ndarray,
+        *,
+        rng,
     ) -> None:
         """Charge exchange: fast ion → slow ion (swap with cold neutral).
 
@@ -453,15 +470,13 @@ class MCCHandler:
         Simplified model: ion velocity is set to thermal background velocity.
         """
         n = len(indices)
-        rng = np.random.default_rng()
-
         # Replace ion velocity with thermal neutral velocity
         # v_th = sqrt(kT/m) ≈ sqrt(0.026 eV * e / M) for room temperature
         v_th = np.sqrt(0.026 * E_CHARGE / self.background_mass)
 
-        cos_theta = 2.0 * rng.random(n) - 1.0
+        cos_theta = 2.0 * uniform_cpu(rng, n) - 1.0
         sin_theta = np.sqrt(1.0 - cos_theta**2)
-        phi = 2.0 * np.pi * rng.random(n)
+        phi = 2.0 * np.pi * uniform_cpu(rng, n)
 
         idx_gpu = cp.asarray(indices)
         particles.vr[idx_gpu] = cp.asarray(v_th * sin_theta * np.cos(phi))
@@ -498,18 +513,203 @@ class MCCHandler:
         Concatenates products from all ionization channels within the
         last perform_collisions() call, then clears the buffer.
         """
-        buffers = getattr(self, "_new_ion_buffers", None)
-        if not buffers:
-            self._new_ion_buffers = []
+        ion_map = self.get_new_ions_by_species()
+        if not ion_map:
             return None
-        result = _concat_particle_dicts(buffers)
-        self._new_ion_buffers = []
+        result = _concat_particle_dicts(list(ion_map.values()))
         return result
+
+    def get_new_ions_by_species(self) -> dict[str, dict[str, np.ndarray]]:
+        """Retrieve newly created ions, keyed by product species name."""
+
+        buffers_by_species = getattr(self, "_new_ion_buffers_by_species", None)
+        if not buffers_by_species:
+            self._new_ion_buffers_by_species = {}
+            return {}
+        result = {
+            name: _concat_particle_dicts(buffers)
+            for name, buffers in buffers_by_species.items()
+            if buffers
+        }
+        self._new_ion_buffers_by_species = {}
+        return result
+
+    def get_collision_weight_sums(self) -> dict[str, float]:
+        """Retrieve weighted physical collision totals from the last pass."""
+
+        weights = getattr(self, "_weight_sums", {})
+        self._weight_sums = {}
+        return {name: float(value) for name, value in weights.items()}
 
     def update_background_density(self, n_bg: float) -> None:
         """Update background neutral density (e.g., for gas rarefaction)."""
         self.background_density = n_bg
         self._update_null_frequency()
+
+
+def _merge_event_cloud(
+    target: dict[str, dict[str, np.ndarray]],
+    name: str,
+    cloud: dict[str, np.ndarray],
+) -> None:
+    if name not in target:
+        target[name] = {
+            "r": np.asarray(cloud["r"], dtype=np.float64).copy(),
+            "z": np.asarray(cloud["z"], dtype=np.float64).copy(),
+        }
+        return
+    target[name]["r"] = np.concatenate((target[name]["r"], np.asarray(cloud["r"], dtype=np.float64)))
+    target[name]["z"] = np.concatenate((target[name]["z"], np.asarray(cloud["z"], dtype=np.float64)))
+
+
+@dataclass
+class CompositeMCCHandler:
+    """Aggregate multiple background-specific MCC handlers for one projectile."""
+
+    handlers: list[MCCHandler] = field(default_factory=list)
+    _new_electron_buffers: list[dict[str, np.ndarray]] = field(default_factory=list)
+    _new_ion_buffers_by_species: dict[str, list[dict[str, np.ndarray]]] = field(default_factory=dict)
+    _event_buffers: dict[str, dict[str, np.ndarray]] = field(default_factory=dict)
+    _weight_sums: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def processes(self) -> list[CollisionProcess]:
+        result: list[CollisionProcess] = []
+        for handler in self.handlers:
+            result.extend(handler.processes)
+        return result
+
+    def perform_collisions(self, particles, dt: float, rng=None) -> dict[str, int]:
+        self._new_electron_buffers = []
+        self._new_ion_buffers_by_species = {}
+        self._event_buffers = {}
+        self._weight_sums = {}
+        counts: dict[str, int] = {}
+        if rng is None:
+            rng = SimulationRNG()
+        for handler in self.handlers:
+            handler._new_electron_buffers = []
+            handler._new_ion_buffers_by_species = {}
+            handler._event_buffers = {}
+            handler._weight_sums = {}
+
+        n = particles.count
+        total_upper = self._combined_upper_rate()
+        if n == 0 or total_upper <= 0.0:
+            return counts
+
+        p_null = 1.0 - np.exp(-total_upper * dt)
+        if p_null <= 0.0:
+            return counts
+
+        rand_select = rng.rand(n, dtype=cp.float64)
+        alive_mask = particles.alive[:n] == 1
+        collide_mask = (rand_select < p_null) & alive_mask
+        collide_indices = cp.where(collide_mask)[0]
+        n_collide = len(collide_indices)
+        if n_collide == 0:
+            return counts
+
+        vr = cp.asnumpy(particles.vr[:n][collide_indices])
+        vz = cp.asnumpy(particles.vz[:n][collide_indices])
+        vt = cp.asnumpy(particles.vtheta[:n][collide_indices])
+        v2 = vr**2 + vz**2 + vt**2
+        v_mag = np.sqrt(v2)
+        energy_ev = 0.5 * self.handlers[0].projectile_mass * v2 / E_CHARGE
+        rand_type = uniform_cpu(rng, n_collide)
+        processed = np.zeros(n_collide, dtype=bool)
+        cumulative_prob = np.zeros(n_collide, dtype=np.float64)
+
+        for handler in self.handlers:
+            for proc in handler.processes:
+                sigma = proc.cross_section(energy_ev)
+                rate = handler.background_density * sigma * v_mag
+                cumulative_prob += np.where(total_upper > 0.0, rate / total_upper, 0.0)
+                this_collision = (~processed) & (rand_type < cumulative_prob)
+                collision_idx = np.where(this_collision)[0]
+                if len(collision_idx) == 0:
+                    counts.setdefault(proc.name, 0)
+                    continue
+
+                orig_idx = cp.asnumpy(collide_indices[collision_idx])
+                idx_gpu = cp.asarray(orig_idx)
+                _merge_event_cloud(
+                    self._event_buffers,
+                    proc.name,
+                    {
+                        "r": cp.asnumpy(particles.r[idx_gpu]),
+                        "z": cp.asnumpy(particles.z[idx_gpu]),
+                    },
+                )
+                self._weight_sums[proc.name] = self._weight_sums.get(proc.name, 0.0) + float(
+                    np.sum(cp.asnumpy(particles.weight[idx_gpu]))
+                )
+                counts[proc.name] = counts.get(proc.name, 0) + handler._apply_collision(
+                    proc,
+                    particles,
+                    orig_idx,
+                    energy_ev[collision_idx],
+                    v_mag[collision_idx],
+                    vr[collision_idx],
+                    vz[collision_idx],
+                    vt[collision_idx],
+                    rng=rng,
+                )
+                processed[collision_idx] = True
+
+        counts["null"] = int(np.sum(~processed))
+        for handler in self.handlers:
+            child_electrons = handler.get_new_electrons()
+            if child_electrons is not None:
+                self._new_electron_buffers.append(child_electrons)
+            for species_name, ion_data in handler.get_new_ions_by_species().items():
+                self._new_ion_buffers_by_species.setdefault(species_name, []).append(ion_data)
+        return counts
+
+    def get_new_electrons(self) -> dict[str, np.ndarray] | None:
+        if not self._new_electron_buffers:
+            return None
+        result = _concat_particle_dicts(self._new_electron_buffers)
+        self._new_electron_buffers = []
+        return result
+
+    def get_new_ions(self) -> dict[str, np.ndarray] | None:
+        ions_by_species = self.get_new_ions_by_species()
+        if not ions_by_species:
+            return None
+        return _concat_particle_dicts(list(ions_by_species.values()))
+
+    def get_new_ions_by_species(self) -> dict[str, dict[str, np.ndarray]]:
+        if not self._new_ion_buffers_by_species:
+            return {}
+        result = {
+            name: _concat_particle_dicts(buffers)
+            for name, buffers in self._new_ion_buffers_by_species.items()
+            if buffers
+        }
+        self._new_ion_buffers_by_species = {}
+        return result
+
+    def get_event_positions(self) -> dict[str, dict[str, np.ndarray]]:
+        buffers = self._event_buffers
+        self._event_buffers = {}
+        return buffers
+
+    def get_collision_weight_sums(self) -> dict[str, float]:
+        weights = self._weight_sums
+        self._weight_sums = {}
+        return {name: float(value) for name, value in weights.items()}
+
+    def update_background_state(self, background_state: dict[str, float]) -> None:
+        for handler in self.handlers:
+            background_name = getattr(handler, "background_species_name", None)
+            if background_name is None:
+                continue
+            if background_name in background_state:
+                handler.update_background_density(background_state[background_name])
+
+    def _combined_upper_rate(self) -> float:
+        return float(sum(max(handler._nu_null, 0.0) for handler in self.handlers))
 
 
 def make_electron_ar_mcc(

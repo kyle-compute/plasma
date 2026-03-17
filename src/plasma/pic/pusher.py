@@ -23,8 +23,8 @@ References:
 
 from __future__ import annotations
 
-import cupy as cp
-from numba import cuda
+from plasma.runtime.cupy_compat import cp
+from plasma.runtime.numba_compat import cuda
 
 
 @cuda.jit(fastmath=True)
@@ -112,8 +112,11 @@ def boris_push_kernel(
     z[idx] = z[idx] + dt * vz[idx]
 
     # Handle axis reflection: if particle crosses r=0
-    if r[idx] < 0.0:
-        r[idx] = -r[idx]
+    if r[idx] <= 0.0:
+        r_reflected = -r[idx]
+        if r_reflected == 0.0:
+            r_reflected = 1e-30
+        r[idx] = r_reflected
         vr[idx] = -vr[idx]
         vtheta[idx] = -vtheta[idx]
 
@@ -173,8 +176,11 @@ def electrostatic_push_kernel(
     r[idx] += dt * vr[idx]
     z[idx] += dt * vz[idx]
 
-    if r[idx] < 0.0:
-        r[idx] = -r[idx]
+    if r[idx] <= 0.0:
+        r_reflected = -r[idx]
+        if r_reflected == 0.0:
+            r_reflected = 1e-30
+        r[idx] = r_reflected
         vr[idx] = -vr[idx]
 
 

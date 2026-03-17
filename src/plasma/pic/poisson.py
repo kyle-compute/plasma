@@ -24,13 +24,11 @@ References:
 
 from __future__ import annotations
 
-import cupy as cp
 import numpy as np
-from cupyx.scipy.sparse import csr_matrix as gpu_csr
-from cupyx.scipy.sparse.linalg import spsolve as gpu_spsolve
 from scipy.sparse import csr_matrix, lil_matrix
 
 from plasma.core.constants import EPSILON_0
+from plasma.runtime.cupy_compat import cp, gpu_csr_matrix, gpu_spsolve
 
 
 class PoissonSolverCylindrical:
@@ -168,7 +166,7 @@ class PoissonSolverCylindrical:
 
         # Convert to CSR for efficient solve
         A_csr = csr_matrix(A)
-        self._A_gpu = gpu_csr(A_csr)
+        self._A_gpu = gpu_csr_matrix(A_csr)
 
     def solve(
         self,

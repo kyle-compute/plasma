@@ -5,8 +5,8 @@ import numpy as np
 from plasma.diagnostics.collectors import SubstrateCollector
 from plasma.live.pic_fields import emissivity_proxy, event_map
 from plasma.live.pic_window import clear_event_clouds, event_counts, merge_event_clouds
-from plasma.pic.particles import ParticleArray, Species
 from plasma.pic.grid import CylindricalGrid
+from plasma.pic.particles import ParticleArray, Species
 
 
 def test_event_window_merges_and_clears() -> None:

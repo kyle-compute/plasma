@@ -582,7 +582,7 @@ class PlasmaViewerWindow(QtWidgets.QMainWindow):
         lines = [
             f"field        {self.field_name}",
             f"preset       {self.current_preset}",
-            f"geometry     axisymmetric",
+            "geometry     axisymmetric",
             f"pulse_phase  {phase_label}",
             f"step         {self.snapshot.step}",
             f"time_us      {self.snapshot.time_s * 1e6:.2f}",

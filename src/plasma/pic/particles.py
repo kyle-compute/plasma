@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import cupy as cp
 import numpy as np
 from numpy.typing import NDArray
 
 # Type alias for GPU arrays
+from plasma.runtime.cupy_compat import cp
+
 GpuArray = cp.ndarray
 
 

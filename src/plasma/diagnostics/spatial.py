@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import cupy as cp
 import numpy as np
 from numpy.typing import NDArray
 
 from plasma.core.constants import E_CHARGE
 from plasma.pic.deposit import deposit_charge_kernel, deposit_number_density
+from plasma.runtime.cupy_compat import cp
 
 
 def electron_density_profile(grid, electrons) -> NDArray:

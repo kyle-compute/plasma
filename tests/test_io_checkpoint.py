@@ -3,11 +3,14 @@
 import numpy as np
 import pytest
 
+pytest.importorskip("h5py")
+
 from plasma.core.constants import E_CHARGE, M_AR, M_ELECTRON
 from plasma.io.checkpoint import list_checkpoints, load_checkpoint, save_checkpoint
 from plasma.io.hdf5_diagnostics import load_diagnostics, save_diagnostics_snapshot
 from plasma.pic.grid import CylindricalGrid
 from plasma.pic.particles import ParticleArray, Species
+from plasma.runtime.random import SimulationRNG, build_rng_from_state
 
 
 @pytest.fixture
@@ -112,6 +115,45 @@ class TestCheckpointRoundtrip:
         assert gp["nz"] == grid.nz
         assert abs(gp["r_max"] - grid.r_max) < 1e-15
 
+    def test_background_state_and_metadata_preserved(self, tmp_path, grid, ion_species):
+        ions = ParticleArray(species=ion_species)
+        ions.allocate(10)
+        path = tmp_path / "background_test.h5"
+        save_checkpoint(
+            path,
+            12,
+            4.0e-9,
+            grid,
+            {"Ar+": ions},
+            background_state={"Ar_c": 2.0e20, "Cu": 4.0e17},
+            metadata={"collision_package": "cu_ar_public_v1"},
+        )
+
+        data = load_checkpoint(path)
+        assert data["background_state"]["Ar_c"] == pytest.approx(2.0e20)
+        assert data["background_state"]["Cu"] == pytest.approx(4.0e17)
+        assert data["metadata"]["collision_package"] == "cu_ar_public_v1"
+
+    def test_rng_state_preserved(self, tmp_path, grid, ion_species):
+        ions = ParticleArray(species=ion_species)
+        ions.allocate(10)
+        rng = SimulationRNG(123)
+        _ = rng.rand(4)
+
+        path = tmp_path / "rng_test.h5"
+        save_checkpoint(
+            path,
+            3,
+            2.0e-9,
+            grid,
+            {"Ar+": ions},
+            rng_state=rng.state_dict(),
+        )
+
+        data = load_checkpoint(path)
+        restored = build_rng_from_state(data["rng_state"])
+        np.testing.assert_allclose(rng.rand(6), restored.rand(6))
+
     def test_list_checkpoints(self, tmp_path, grid, ion_species):
         ions = ParticleArray(species=ion_species)
         ions.allocate(10)
@@ -155,3 +197,17 @@ class TestDiagnosticsSnapshot:
         data = load_diagnostics(path)
         np.testing.assert_allclose(data[0]["iedf_energy"], energy)
         np.testing.assert_allclose(data[0]["eedf_f"], counts * 2)
+
+    def test_background_state_and_collision_counts_stored(self, tmp_path):
+        path = tmp_path / "diag3.h5"
+        save_diagnostics_snapshot(
+            path,
+            step=10,
+            time=1e-6,
+            background_state={"Ar_c": 2.1e20, "Cu": 3.0e17},
+            collision_counts={"e_Ar_c_ionization": 4, "Ar+_Ar_c_cx": 7},
+        )
+
+        data = load_diagnostics(path)
+        assert data[10]["background_state"]["Ar_c"] == pytest.approx(2.1e20)
+        assert data[10]["collision_counts"]["Ar+_Ar_c_cx"] == 7

@@ -1,0 +1,26 @@
+package:
+  name: "cu_target_public_v1"
+  version: "1"
+  target_material: "Cu"
+  material_system: "Cu/Ar"
+  provenance: "literature-fit"
+  notes: "Cu target sputter/SEE defaults derived from the bundled Yamamura fits and repo Cu PIC defaults."
+
+target:
+  cohesive_energy_ev: 3.49
+  sputter_threshold_ev: 17.0
+  see_energy_ev: 3.0
+
+interactions:
+  - ion: "Ar+"
+    sputter_yield_a: 0.1421
+    sputter_yield_b: 0.468
+    threshold_ev: 17.0
+    secondary_electron_yield: 0.10
+    citation: "Yamamura & Tawara (1996) Cu sputter fit with repo Cu SEE default."
+  - ion: "Cu+"
+    sputter_yield_a: 0.0691
+    sputter_yield_b: 0.556
+    threshold_ev: 15.0
+    secondary_electron_yield: 0.08
+    citation: "Repo Cu self-sputter fit and Cu-ion SEE default."

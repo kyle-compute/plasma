@@ -25,14 +25,15 @@ References:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-import cupy as cp
 import numpy as np
-from numba import cuda
 
 from plasma.core.constants import E_CHARGE
 from plasma.data.sputtering import SputterYield
+from plasma.runtime.cupy_compat import cp
+from plasma.runtime.numba_compat import cuda
+from plasma.runtime.random import SimulationRNG, uniform_cpu
 
 
 @dataclass
@@ -58,6 +59,8 @@ class MagnetronTarget:
     sputter_yield: SputterYield | None = None
     surface_binding_ev: float = 3.49  # Cu cohesive energy
     material_mass: float = 63.546 * 1.66053906660e-27  # Cu
+    species_see_yields: dict[str, float] = field(default_factory=dict)
+    species_sputter_yields: dict[str, SputterYield] = field(default_factory=dict)
 
     def is_on_target(self, r: float) -> bool:
         """Check if radial position is within the erosion zone."""
@@ -67,11 +70,23 @@ class MagnetronTarget:
         """Vectorized check for target zone."""
         return (r >= self.r_inner) & (r <= self.r_outer)
 
+    def see_yield_for_species(self, species_name: str) -> float:
+        """Return the SEE yield for one impacting ion species."""
+
+        return float(self.species_see_yields.get(species_name, self.see_yield))
+
+    def sputter_yield_for_species(self, species_name: str) -> SputterYield | None:
+        """Return the sputter-yield model for one impacting ion species."""
+
+        return self.species_sputter_yields.get(species_name, self.sputter_yield)
+
 
 def process_target_impacts(
     target: MagnetronTarget,
     ion_particles,
     grid,
+    *,
+    rng=None,
 ) -> dict[str, np.ndarray | None]:
     """Process ions hitting the target surface.
 
@@ -127,15 +142,19 @@ def process_target_impacts(
     v2 = vr_cpu[hit_idx]**2 + vz_cpu[hit_idx]**2 + vt_cpu[hit_idx]**2
     impact_energy_ev = 0.5 * ion_particles.species.mass * v2 / E_CHARGE
 
-    rng = np.random.default_rng()
+    if rng is None:
+        rng = SimulationRNG()
+    species_name = ion_particles.species.name
+    see_yield = target.see_yield_for_species(species_name)
+    sputter_yield = target.sputter_yield_for_species(species_name)
 
     # --- Secondary Electron Emission ---
     see_data = None
-    if target.see_yield > 0:
+    if see_yield > 0:
         # Probabilistic SEE: each impact has probability = yield
         # For yield < 1, each ion randomly emits 0 or 1 electron
-        see_rand = rng.random(n_hits)
-        see_mask = see_rand < target.see_yield
+        see_rand = uniform_cpu(rng, n_hits)
+        see_mask = see_rand < see_yield
         n_see = int(np.sum(see_mask))
 
         if n_see > 0:
@@ -144,9 +163,9 @@ def process_target_impacts(
 
             # SEE electrons emitted with low energy, random direction into half-space
             v_see = np.sqrt(2.0 * target.see_energy_ev * E_CHARGE / 9.109e-31)
-            cos_theta = rng.random(n_see)  # Half-space: cos(theta) in [0, 1]
+            cos_theta = uniform_cpu(rng, n_see)  # Half-space: cos(theta) in [0, 1]
             sin_theta = np.sqrt(1.0 - cos_theta**2)
-            phi = 2.0 * np.pi * rng.random(n_see)
+            phi = 2.0 * np.pi * uniform_cpu(rng, n_see)
 
             see_data = {
                 "r": see_r,
@@ -159,14 +178,14 @@ def process_target_impacts(
 
     # --- Sputtering ---
     sputter_data = None
-    if target.sputter_yield is not None:
+    if sputter_yield is not None:
         # Compute yield for each impact energy
-        yields = target.sputter_yield(impact_energy_ev)
+        yields = sputter_yield(impact_energy_ev)
 
         # Probabilistic: each impact creates floor(Y) + maybe 1 more atom
         n_sputtered_per_ion = np.floor(yields).astype(int)
         frac = yields - n_sputtered_per_ion
-        extra = (rng.random(n_hits) < frac).astype(int)
+        extra = (uniform_cpu(rng, n_hits) < frac).astype(int)
         n_sputtered_per_ion += extra
 
         total_sputtered = int(np.sum(n_sputtered_per_ion))
@@ -194,7 +213,7 @@ def process_target_impacts(
                 # where E_b = surface binding energy
                 # Sample using inverse CDF
                 e_b = target.surface_binding_ev
-                u = rng.random(ns)
+                u = uniform_cpu(rng, ns)
                 # Approximate: E = E_b * u / (1 - u) capped at impact energy
                 sp_energy = e_b * u / (1.0 - u + 1e-10)
                 sp_energy = np.minimum(sp_energy, impact_energy_ev[i])
@@ -203,9 +222,9 @@ def process_target_impacts(
                 sp_speed = np.sqrt(2.0 * sp_energy * E_CHARGE / target.material_mass)
 
                 # Cosine distribution into half-space (away from target)
-                cos_theta = np.sqrt(rng.random(ns))  # cos-weighted
+                cos_theta = np.sqrt(uniform_cpu(rng, ns))  # cos-weighted
                 sin_theta = np.sqrt(1.0 - cos_theta**2)
-                phi = 2.0 * np.pi * rng.random(ns)
+                phi = 2.0 * np.pi * uniform_cpu(rng, ns)
 
                 sp_vr[idx:idx + ns] = sp_speed * sin_theta * np.cos(phi)
                 sp_vz[idx:idx + ns] = sp_speed * cos_theta  # +z away from target

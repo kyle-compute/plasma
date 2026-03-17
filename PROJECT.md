@@ -6,17 +6,17 @@ Build a GPU-accelerated plasma simulation for **High Power Impulse Magnetron Spu
 
 1. **0D Global Model (Ionization Region Model)** — Volume-averaged ODE system tracking species densities and electron temperature in the ionization region. Runs in seconds. Current status: reduced Cu/Ar IRM prototype with numerical sanity-check tests (not yet reproducing specific published figures/tables from Gudmundsson 2022 or Brenning 2021).
 
-2. **2D Axisymmetric PIC-MCC** — Fully kinetic Particle-in-Cell with Monte Carlo Collisions in cylindrical (r, z) geometry. Tracks individual macro-particles for electrons, Ar+, metal ions, and neutrals. Self-consistent E-field via Poisson solver, prescribed static B-field from magnetron geometry. Runs on GPU. Used for spatially-resolved plasma dynamics: sheath structure, IEDFs at the substrate, spoke formation, and gas rarefaction.
+2. **2D Axisymmetric PIC-MCC** — Fully kinetic Particle-in-Cell with Monte Carlo Collisions in cylindrical (r, z) geometry. Tracks individual macro-particles for electrons, Ar+, metal ions, and neutrals. Self-consistent E-field via Poisson solver, prescribed static B-field from magnetron geometry. Runs on GPU. Used for spatially-resolved plasma dynamics such as sheath structure, exploratory substrate IEDFs, and discharge-geometry trends. Because the model is axisymmetric in `(r, z)`, it cannot resolve azimuthal spoke formation.
 
 The codebase is designed to be **extensible toward AI-driven plasma control** — specifically, a future pipeline where computer vision observes real plasma behavior (e.g., plasma globes, OES diagnostics) and ML surrogates trained on simulation data close the loop between prediction and experiment.
 
-### Target outputs (planned analyses — not yet implemented)
+### Target outputs (current status)
 
-- Ionization probability (alpha_t) and back-attraction probability (beta_t) for given process parameters. Currently only a heuristic beta_t exists in `transport.py`; alpha_t, xi_t, epsilon_ti are not yet computed.
-- Ion energy distribution function (IEDF) at the substrate — requires PIC diagnostics module (not yet written).
+- Ionization probability (`alpha_t`) and transport metrics (`xi_t`) are emitted by the 0D model. `beta_t` and related metal-transport closures are still partly heuristic and should not be treated as benchmark observables yet.
+- Ion energy distribution function (IEDF) at the substrate is now collected from absorbed boundary-crossing positive ions in the PIC runtime. It is model-derived for the species actually simulated; it is not yet a fully benchmarked deposition diagnostic.
 - Ionized flux fraction as a function of pulse parameters.
 - Mixed HiPIMS + dcMS pulsing optimization.
-- Energy cost per deposited ion (epsilon_ti).
+- Energy cost per deposited ion (`epsilon_ti`) remains derived from closure quantities and is not validation-grade.
 
 ---
 
@@ -43,7 +43,7 @@ The codebase is designed to be **extensible toward AI-driven plasma control** �
 
 From Gudmundsson 2022 IRM for Cu/Ar discharge (extensible to Ti/Ar, Al/Ar).
 
-**Current implementation status:** The 0D model uses a reduced state vector (n_Ar, n_e, n_Ar+, n_Cu, n_Cu+, T_e) and does not evolve e_hot, Ar_h, Ar_m, Ar_4p, or the full species picture below. The full species table is included here as a reference for future extension:
+**Current implementation status:** The 0D model now carries dual electron populations and an expanded Cu/Ar state including argon excited states and copper excited/metastable channels. That said, several transport observables are still closure-driven and the full state below should be read as the intended physical basis, not a claim that every listed observable is already benchmark-calibrated.
 
 | Species | Symbol | Notes |
 |---------|--------|-------|
@@ -93,7 +93,7 @@ From Gudmundsson 2022 IRM for Cu/Ar discharge (extensible to Ti/Ar, Al/Ar).
 
 Rate coefficients are parameterized as functions of T_e, stored in `data/reactions/`.
 
-**Current limitation:** The code always evaluates rates with `population="cold"` (1-7 eV fits). Hot-electron rate fits (200-1000 eV) are defined in the YAML data but are not yet coupled into the 0D model.
+**Current limitation:** Hot-electron routing is wired into the 0D reaction assembly, but not every hot branch in the YAML package is physically populated yet. Several channels still carry zero-fit placeholders and need literature-calibrated replacement before research use.
 
 ### 3.3 Sputtering Model
 
@@ -162,14 +162,14 @@ Nanbu no-time-counter scheme. Collision probability P based on null-collision fr
 
 | Dataset | Source | Species | Format | Status |
 |---------|--------|---------|--------|--------|
-| Electron-Ar elastic | Phelps / Biagi | e + Ar | sigma(E) TSV | **Not downloaded** |
-| Electron-Ar ionization | Phelps | e + Ar → Ar+ + 2e | sigma(E) TSV | **Not downloaded** |
-| Electron-Ar excitation | IST-Lisbon | e + Ar → Ar* + e | sigma(E) TSV | **Not downloaded** |
-| Electron-Cu ionization | Freund / IAEA | e + Cu → Cu+ + e | sigma(E) TSV | **Not downloaded** |
-| Electron-Cu excitation | Bogaerts | e + Cu → Cu* + e | sigma(E) TSV | **Not downloaded** |
-| Ar+ - Ar charge exchange | Phelps | Ar+ + Ar → Ar + Ar+ | sigma(E) TSV | **Not downloaded** |
-| Magnetic field maps | Analytical or measured | B_r(r,z), B_z(r,z) | .npz | **Computed analytically** via `magnetic.py` |
-| Discharge waveforms | Experiment | V_D(t), I_D(t) | CSV | **Not downloaded** |
+| Electron-Ar elastic | Phelps / Biagi | e + Ar | sigma(E) TSV | **Bundled** in `data/cross_sections/lxcat_biagi_e_ar/` |
+| Electron-Ar ionization | Phelps | e + Ar → Ar+ + 2e | sigma(E) TSV | **Bundled** in `data/cross_sections/lxcat_biagi_e_ar/` |
+| Electron-Ar excitation | IST-Lisbon | e + Ar → Ar* + e | sigma(E) TSV | **Bundled** in `data/cross_sections/lxcat_biagi_e_ar/` |
+| Electron-Cu ionization | Freund / IAEA | e + Cu → Cu+ + e | sigma(E) TSV | **Not bundled**; current PIC uses exploratory synthetic fallback |
+| Electron-Cu excitation | Bogaerts | e + Cu → Cu* + e | sigma(E) TSV | **Not bundled**; current PIC uses exploratory synthetic fallback |
+| Ar+ - Ar charge exchange | Phelps | Ar+ + Ar → Ar + Ar+ | sigma(E) TSV | **Synthetic fallback only** in current public package |
+| Magnetic field maps | Analytical or measured | B_r(r,z), B_z(r,z) | .npz | **Surrogate field map bundled**; measured map still required for research-grade validation |
+| Discharge waveforms | Experiment | V_D(t), I_D(t) | CSV | **Literature-fit waveform bundled** for the public Cu/Ar case |
 | Ti/Ar rate coefficients | Gudmundsson | Ti/Ar reactions | YAML | **Planned, not created** |
 
 **Download strategy (planned):** Script `scripts/download_lxcat_data.py` (not yet written) to fetch from LXCat API. All stored as two-column TSV (energy_eV, cross_section_m2).
@@ -184,7 +184,7 @@ Static B-field computed from magnetron geometry via elliptic-integral Biot-Savar
 
 ### 4.4 Discharge Waveforms
 
-The waveform loader (`data/waveforms.py`) exists and can read CSV files, but is **not yet wired into the 0D model** — the IRM currently builds a square pulse internally. Integration of external waveform files is planned.
+The waveform loader (`data/waveforms.py`) is wired into both the PIC path and the 0D benchmark-package flow. The bundled public Cu/Ar case currently uses a literature-fit waveform rather than a measured experimental trace.
 
 ---
 

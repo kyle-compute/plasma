@@ -73,9 +73,29 @@ def test_pic_bundle_manifest_and_validation_are_exploratory(tmp_path) -> None:
 
     assert bundle.summary["peak_target_voltage_v"] == 600.0
     assert bundle.summary["total_target_impacts"] == 15.0
+    assert bundle.summary["total_collision_elastic"] == 9.0
+    assert "collision_elastic_step" in bundle.series
     assert "substrate_iedf" in bundle.distributions
     assert report.status == "exploratory"
     assert manifest.validation_status == "exploratory"
+    assert manifest.run_mode == cfg.mode
 
     plot_path = save_pic_quicklook(bundle, tmp_path / "pic_summary.png", title=cfg.name)
     assert plot_path.exists()
+
+
+def test_pic_bundle_uses_weakest_collision_channel_provenance() -> None:
+    diag = FakePICDiag()
+    waveform = make_square_pulse(600.0, 100e-6, 300e-6)
+    bundle = bundle_from_pic_run(
+        diag,
+        waveform,
+        collision_provenance="model-derived",
+        collision_channel_provenance={
+            "elastic": "public-download",
+            "ionization": "synthetic",
+            "null": "synthetic",
+        },
+    )
+
+    assert bundle.series["collisions_per_sample"].provenance == "synthetic"

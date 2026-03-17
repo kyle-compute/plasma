@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from plasma.pic.config import load_pic_config
 from plasma.pic.runtime import build_simulation
 
@@ -12,11 +10,15 @@ def test_public_pic_config_resolves_normalized_files() -> None:
     cfg = load_pic_config("config/hipims_cu_ar_pic_public.yaml")
 
     assert cfg.cross_sections.source == "normalized_files"
+    assert cfg.collision_package is not None
+    assert cfg.collision_package.endswith("data/collision_packages/cu_ar_public_v1.yaml")
     assert cfg.cross_sections.elastic_file is not None
     assert cfg.cross_sections.elastic_file.endswith("electron_ar_elastic.tsv")
     assert cfg.case is not None
     assert cfg.case.inputs[1].provenance == "public-download"
-    assert cfg.case.inputs[2].provenance == "surrogate"
+    assert cfg.case.inputs[2].kind == "collision_package"
+    assert cfg.case.inputs[2].provenance == "synthetic"
+    assert cfg.case.inputs[3].provenance == "surrogate"
 
 
 def test_build_simulation_uses_public_cross_sections(tmp_path) -> None:
@@ -61,6 +63,7 @@ def test_build_simulation_uses_public_cross_sections(tmp_path) -> None:
                 '  elastic_file: "data/cross_sections/lxcat_biagi_e_ar/electron_ar_elastic.tsv"',
                 '  excitation_file: "data/cross_sections/lxcat_biagi_e_ar/electron_ar_excitation_total.tsv"',
                 '  ionization_file: "data/cross_sections/lxcat_biagi_e_ar/electron_ar_ionization.tsv"',
+                'collision_package: "data/collision_packages/cu_ar_public_v1.yaml"',
                 "time:",
                 "  dt: 5.0e-12",
                 "  n_steps: 10",
@@ -73,5 +76,13 @@ def test_build_simulation_uses_public_cross_sections(tmp_path) -> None:
     sim = build_simulation(cfg)
 
     electron_handler = sim["mcc_handlers"]["electron"]
-    names = [process.name for process in electron_handler.processes]
-    assert names == ["e_Ar_elastic", "e_Ar_excitation", "e_Ar_ionization"]
+    electron_names = {process.name for process in electron_handler.processes}
+    ion_names = {process.name for process in sim["mcc_handlers"]["Ar+"].processes}
+    assert electron_names == {
+        "e_Ar_c_elastic",
+        "e_Ar_c_excitation",
+        "e_Ar_c_ionization",
+        "e_Cu_ground_excitation",
+        "e_Cu_ground_ionization",
+    }
+    assert ion_names == {"Ar+_Ar_c_cx", "Ar+_Cu_cx"}

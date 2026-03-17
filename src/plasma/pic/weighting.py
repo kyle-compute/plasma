@@ -12,8 +12,9 @@ This module provides:
 
 from __future__ import annotations
 
-import cupy as cp
 import numpy as np
+
+from plasma.runtime.cupy_compat import cp
 
 
 def compute_weight(
@@ -79,6 +80,17 @@ def initialize_particles_uniform(
         Dict with keys: r, z, vr, vz, vtheta, weight.
     """
     from plasma.core.constants import E_CHARGE
+
+    if n_density <= 0.0 or ppc <= 0:
+        empty = cp.empty(0, dtype=cp.float64)
+        return {
+            "r": empty.copy(),
+            "z": empty.copy(),
+            "vr": empty.copy(),
+            "vz": empty.copy(),
+            "vtheta": empty.copy(),
+            "weight": empty.copy(),
+        }
 
     nr, nz = grid.nr, grid.nz
     n_total = nr * nz * ppc

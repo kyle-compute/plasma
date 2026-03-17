@@ -36,6 +36,10 @@ viz = [
     "ipywidgets>=8.1",
 ]
 
+[project.scripts]
+plasma-tools = "plasma.cli:main"
+plasma-desktop = "plasma.desktop_launcher:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -49,7 +53,15 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/plasma/pic/*.py" = ["N803", "N806"]
+"tests/*.py" = ["N802", "N806"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+markers = [
+    "slow: long-running benchmark and validation tests",
+]

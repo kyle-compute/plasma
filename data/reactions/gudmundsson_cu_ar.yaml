@@ -10,6 +10,87 @@
 #   threshold_ev: energy threshold for the reaction
 #   type: ionization | excitation | deexcitation | decay | charge_exchange | penning
 
+metadata:
+  package: "gudmundsson_cu_ar"
+  source: "Gudmundsson et al., Surf. Coat. Technol. 442 (2022) 128189."
+
+species:
+  - symbol: "e_cold"
+    family: "electron"
+    population: "cold"
+    role: "bulk"
+    charge: -1
+  - symbol: "e_hot"
+    family: "electron"
+    population: "hot"
+    role: "secondary"
+    charge: -1
+  - symbol: "Ar_c"
+    family: "argon"
+    role: "ground"
+    charge: 0
+  - symbol: "Ar_h"
+    family: "argon"
+    role: "returned_hot"
+    charge: 0
+  - symbol: "Ar_w"
+    family: "argon"
+    role: "returned_warm"
+    charge: 0
+  - symbol: "Ar_m"
+    family: "argon"
+    role: "metastable"
+    charge: 0
+    energy_level_ev: 11.55
+    metastable: true
+  - symbol: "Ar_r"
+    family: "argon"
+    role: "resonant"
+    charge: 0
+    energy_level_ev: 11.72
+  - symbol: "Ar_4p"
+    family: "argon"
+    role: "excited"
+    charge: 0
+    energy_level_ev: 13.0
+  - symbol: "Ar+"
+    family: "argon"
+    role: "ion"
+    charge: 1
+  - symbol: "Ar2+"
+    family: "argon"
+    role: "ion"
+    charge: 2
+  - symbol: "Cu"
+    family: "copper"
+    role: "ground"
+    charge: 0
+  - symbol: "Cu_m1"
+    family: "copper"
+    role: "metastable"
+    charge: 0
+    energy_level_ev: 1.389
+    metastable: true
+  - symbol: "Cu_m2"
+    family: "copper"
+    role: "metastable"
+    charge: 0
+    energy_level_ev: 1.642
+    metastable: true
+  - symbol: "Cu_ex"
+    family: "copper"
+    role: "excited"
+    charge: 0
+    energy_level_ev: 3.786
+  - symbol: "Cu+"
+    family: "copper"
+    role: "ion"
+    charge: 1
+  - symbol: "Cu2+"
+    family: "copper"
+    role: "ion"
+    charge: 2
+
 reactions:
   # ══════════════════════════════════════════════════════════════════
   # Electron-Argon reactions (R1-R9)

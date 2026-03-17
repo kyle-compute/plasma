@@ -1,0 +1,12 @@
+window_title: "Plasma Desktop Launcher"
+
+generation:
+  runtime_dir: "output/.desktop"
+  output_root: "output/pic"
+  live_root: "output/live"
+  run_name_template: "desktop_{profile}_{steps}"
+  diag_divisor: 100
+  diag_min: 20
+  compact_divisor: 40
+  compact_min: 100
+  checkpoint_interval: 0

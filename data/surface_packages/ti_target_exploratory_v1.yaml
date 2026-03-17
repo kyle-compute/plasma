@@ -1,0 +1,26 @@
+package:
+  name: "ti_target_exploratory_v1"
+  version: "1"
+  target_material: "Ti"
+  material_system: "Ti/Ar"
+  provenance: "heuristic"
+  notes: "Exploratory Ti target sputter/SEE defaults. Research mode still requires public Ti validation inputs."
+
+target:
+  cohesive_energy_ev: 4.89
+  sputter_threshold_ev: 20.0
+  see_energy_ev: 3.0
+
+interactions:
+  - ion: "Ar+"
+    sputter_yield_a: 0.0813
+    sputter_yield_b: 0.474
+    threshold_ev: 20.0
+    secondary_electron_yield: 0.12
+    citation: "Bundled Ti Yamamura fit with repo Ti Ar+ SEE default."
+  - ion: "Ti+"
+    sputter_yield_a: 0.0450
+    sputter_yield_b: 0.520
+    threshold_ev: 18.0
+    secondary_electron_yield: 0.10
+    citation: "Bundled Ti self-sputter fit and exploratory Ti-ion SEE default."

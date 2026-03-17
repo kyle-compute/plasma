@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
-import h5py
 import numpy as np
 from numpy.typing import NDArray
+
+
+def _require_h5py() -> Any:
+    import h5py
+
+    return h5py
 
 
 def save_diagnostics_snapshot(
@@ -19,6 +25,8 @@ def save_diagnostics_snapshot(
     te_ev: NDArray | None = None,
     iedf: tuple[NDArray, NDArray] | None = None,
     eedf: tuple[NDArray, NDArray] | None = None,
+    background_state: dict[str, float] | None = None,
+    collision_counts: dict[str, int] | None = None,
 ) -> None:
     """Append a diagnostics snapshot to an HDF5 time-series file.
 
@@ -27,7 +35,8 @@ def save_diagnostics_snapshot(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    with h5py.File(path, "a") as f:
+    h5py_module = _require_h5py()
+    with h5py_module.File(path, "a") as f:
         key = f"snapshots/{step:06d}"
         grp = f.create_group(key)
         grp.attrs["step"] = step
@@ -47,6 +56,14 @@ def save_diagnostics_snapshot(
         if eedf is not None:
             grp.create_dataset("eedf_energy", data=eedf[0])
             grp.create_dataset("eedf_f", data=eedf[1])
+        if background_state is not None:
+            bg_grp = grp.create_group("background_state")
+            for name, density in background_state.items():
+                bg_grp.attrs[name] = float(density)
+        if collision_counts is not None:
+            counts_grp = grp.create_group("collision_counts")
+            for name, count in collision_counts.items():
+                counts_grp.attrs[name] = int(count)
 
 
 def load_diagnostics(path: str | Path) -> dict[int, dict]:
@@ -58,7 +75,8 @@ def load_diagnostics(path: str | Path) -> dict[int, dict]:
     path = Path(path)
     result: dict[int, dict] = {}
 
-    with h5py.File(path, "r") as f:
+    h5py_module = _require_h5py()
+    with h5py_module.File(path, "r") as f:
         if "snapshots" not in f:
             return result
         for step_key in sorted(f["snapshots"]):
@@ -66,6 +84,18 @@ def load_diagnostics(path: str | Path) -> dict[int, dict]:
             step = int(grp.attrs["step"])
             snap: dict = {"time": float(grp.attrs["time"])}
             for dset_name in grp:
+                if dset_name == "background_state":
+                    snap[dset_name] = {
+                        str(name): float(value)
+                        for name, value in grp[dset_name].attrs.items()
+                    }
+                    continue
+                if dset_name == "collision_counts":
+                    snap[dset_name] = {
+                        str(name): int(value)
+                        for name, value in grp[dset_name].attrs.items()
+                    }
+                    continue
                 snap[dset_name] = np.array(grp[dset_name])
             result[step] = snap
 

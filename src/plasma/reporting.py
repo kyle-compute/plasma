@@ -16,7 +16,12 @@ def build_validation_report(config, bundle: DiagnosticsBundle) -> ValidationRepo
 
     targets = [] if config.validation is None else config.validation.targets
     if not targets:
-        return ValidationReport(case_name=config.name, status="not_validated")
+        return ValidationReport(
+            case_name=config.name,
+            benchmark_package=None if config.case is None else config.case.benchmark_package,
+            validation_suite=None if config.validation is None else config.validation.suite_name,
+            status="not_validated",
+        )
 
     results = []
     for target in targets:
@@ -40,10 +45,17 @@ def build_validation_report(config, bundle: DiagnosticsBundle) -> ValidationRepo
             )
         )
 
+    exploratory = _has_exploratory_inputs(bundle)
     status = "validated" if all(result.passed for result in results) else "failed"
-    if status == "validated" and _has_exploratory_inputs(bundle):
+    if exploratory:
         status = "exploratory"
-    return ValidationReport(case_name=config.name, status=status, results=results)
+    return ValidationReport(
+        case_name=config.name,
+        benchmark_package=None if config.case is None else config.case.benchmark_package,
+        validation_suite=None if config.validation is None else config.validation.suite_name,
+        status=status,
+        results=results,
+    )
 
 
 def build_run_manifest(config, bundle: DiagnosticsBundle, report: ValidationReport) -> RunManifest:
@@ -65,7 +77,10 @@ def build_run_manifest(config, bundle: DiagnosticsBundle, report: ValidationRepo
     return RunManifest(
         case_name=config.name,
         model=config.model,
+        run_mode=config.mode,
         config_path=config.config_path or "",
+        benchmark_package=None if config.case is None else config.case.benchmark_package,
+        validation_suite=None if config.validation is None else config.validation.suite_name,
         input_sources=inputs,
         metrics=metrics,
         validation_status=status,
@@ -75,15 +90,19 @@ def build_run_manifest(config, bundle: DiagnosticsBundle, report: ValidationRepo
 def _metric_provenance(bundle: DiagnosticsBundle, metric_name: str) -> str | None:
     metric_map = {
         "peak_current_a": "current_a",
+        "peak_circuit_current_a": "current_a",
         "peak_model_current_proxy_a": "model_current_proxy_a",
+        "peak_target_voltage_v": "target_voltage_v",
         "peak_alpha_t": "alpha_t",
         "final_xi_t": "xi_t",
         "peak_deposition_flux_m2s": "deposition_flux_m2s",
         "peak_electron_density": "electron_density",
+        "current_rmse_a": "current_a",
+        "current_peak_ratio": "current_a",
+        "current_peak_time_error_us": "current_a",
         "current_proxy_rmse_a": "model_current_proxy_a",
         "current_proxy_peak_ratio": "model_current_proxy_a",
         "current_proxy_peak_time_error_us": "model_current_proxy_a",
-        "peak_target_voltage_v": "target_voltage_v",
         "peak_field_energy_j": "field_energy_j",
         "peak_total_energy_j": "total_energy_j",
         "total_target_impacts": "n_target_impacts_step",

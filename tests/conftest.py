@@ -10,7 +10,6 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import spsolve
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
@@ -18,9 +17,6 @@ if str(SRC) not in sys.path:
 
 
 def _install_cupy_stub() -> None:
-    if "cupy" in sys.modules:
-        return
-
     cupy = types.ModuleType("cupy")
     cupy.ndarray = np.ndarray
     cupy.float64 = np.float64
@@ -60,9 +56,6 @@ def _install_cupy_stub() -> None:
 
 
 def _install_numba_stub() -> None:
-    if "numba" in sys.modules:
-        return
-
     numba = types.ModuleType("numba")
     cuda = types.ModuleType("numba.cuda")
     launch_state = {"index": 0}
@@ -110,12 +103,33 @@ def _install_numba_stub() -> None:
     sys.modules["numba.cuda"] = cuda
 
 
-try:
-    import cupy  # noqa: F401
-except ModuleNotFoundError:
+def _cupy_is_usable() -> bool:
+    try:
+        import cupy
+    except ModuleNotFoundError:
+        return False
+    try:
+        if cupy.cuda.runtime.getDeviceCount() <= 0:
+            return False
+        _ = cupy.zeros(1, dtype=cupy.float64)
+    except Exception:
+        return False
+    return True
+
+
+def _numba_cuda_is_usable() -> bool:
+    try:
+        from numba import cuda
+    except ModuleNotFoundError:
+        return False
+    try:
+        return bool(cuda.is_available())
+    except Exception:
+        return False
+
+
+if not _cupy_is_usable():
     _install_cupy_stub()
 
-try:
-    import numba  # noqa: F401
-except ModuleNotFoundError:
+if not _numba_cuda_is_usable():
     _install_numba_stub()

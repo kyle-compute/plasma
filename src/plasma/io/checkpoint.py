@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
-import cupy as cp
-import h5py
 import numpy as np
+
+from plasma.runtime.cupy_compat import cp
+
+
+def _require_h5py() -> Any:
+    import h5py
+
+    return h5py
 
 
 def save_checkpoint(
@@ -18,7 +25,9 @@ def save_checkpoint(
     phi: cp.ndarray | None = None,
     br_grid: cp.ndarray | np.ndarray | None = None,
     bz_grid: cp.ndarray | np.ndarray | None = None,
+    background_state: dict[str, float] | None = None,
     metadata: dict | None = None,
+    rng_state: dict | None = None,
 ) -> None:
     """Save simulation state to HDF5 checkpoint.
 
@@ -35,7 +44,8 @@ def save_checkpoint(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    with h5py.File(path, "w") as f:
+    h5py_module = _require_h5py()
+    with h5py_module.File(path, "w") as f:
         # Metadata
         meta = f.create_group("meta")
         meta.attrs["step"] = step
@@ -59,6 +69,18 @@ def save_checkpoint(
         if bz_grid is not None:
             bz = cp.asnumpy(bz_grid) if isinstance(bz_grid, cp.ndarray) else bz_grid
             fields.create_dataset("Bz", data=bz)
+
+        if background_state:
+            background = f.create_group("background_state")
+            for name, density in background_state.items():
+                background.attrs[name] = float(density)
+        if rng_state is not None:
+            rng_group = f.create_group("rng_state")
+            for key, value in rng_state.items():
+                if isinstance(value, list):
+                    rng_group.create_dataset(key, data=np.asarray(value, dtype=np.uint32))
+                else:
+                    rng_group.attrs[key] = value
 
         # Particles — compact before saving
         particles_grp = f.create_group("particles")
@@ -88,8 +110,10 @@ def load_checkpoint(path: str | Path) -> dict:
     path = Path(path)
     result: dict = {}
 
-    with h5py.File(path, "r") as f:
+    h5py_module = _require_h5py()
+    with h5py_module.File(path, "r") as f:
         meta = f["meta"]
+        result["metadata"] = {str(key): meta.attrs[key] for key in meta.attrs}
         result["step"] = int(meta.attrs["step"])
         result["time"] = float(meta.attrs["time"])
         result["grid_params"] = {
@@ -104,6 +128,23 @@ def load_checkpoint(path: str | Path) -> dict:
         result["phi"] = np.array(fields["phi"]) if "phi" in fields else None
         result["Br"] = np.array(fields["Br"]) if "Br" in fields else None
         result["Bz"] = np.array(fields["Bz"]) if "Bz" in fields else None
+        if "background_state" in f:
+            result["background_state"] = {
+                str(name): float(value)
+                for name, value in f["background_state"].attrs.items()
+            }
+        else:
+            result["background_state"] = {}
+        if "rng_state" in f:
+            rng_group = f["rng_state"]
+            result["rng_state"] = {
+                str(key): value
+                for key, value in rng_group.attrs.items()
+            }
+            for key in rng_group:
+                result["rng_state"][str(key)] = np.asarray(rng_group[key]).tolist()
+        else:
+            result["rng_state"] = None
 
         # Particles
         particles = {}

@@ -1,9 +1,10 @@
-"""Tests for reaction rate coefficients — verify against Gudmundsson Table 1."""
+"""Tests for reaction rate coefficients and chemistry metadata."""
 
 import numpy as np
 import pytest
 
 from plasma.data.reactions import RateCoeffFit, load_reactions
+from plasma.global_model.rate_equations import compute_population_reaction_rates
 
 
 @pytest.fixture
@@ -18,6 +19,12 @@ def test_load_all_27_reactions(reactions):
 def test_reaction_ids(reactions):
     expected = [f"R{i}" for i in range(1, 28)]
     assert reactions.ids == expected
+
+
+def test_species_metadata_loaded(reactions):
+    assert reactions.package_name == "gudmundsson_cu_ar"
+    assert reactions.species_order[:4] == ("e_cold", "e_hot", "Ar_c", "Ar_h")
+    assert reactions.species_metadata("Cu_m1").metastable is True
 
 
 def test_r1_ar_ionization_rate(reactions):
@@ -82,3 +89,17 @@ def test_electron_impact_classification(reactions):
     heavy = reactions.heavy_particle()
     # R25-R27 are heavy particle
     assert len(heavy) == 3
+
+
+def test_hot_population_contributes_to_supported_ionization_channels(reactions):
+    densities = {
+        "e_cold": 1.0e17,
+        "e_hot": 1.0e15,
+        "Ar_c": 1.0e20,
+        "Cu": 1.0e18,
+    }
+    rates = compute_population_reaction_rates(densities, reactions, te_cold_ev=3.0, te_hot_ev=250.0)
+
+    assert rates["R1"].hot > 0.0
+    assert rates["R20"].hot > 0.0
+    assert rates["R2"].hot == pytest.approx(0.0)

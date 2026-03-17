@@ -6,15 +6,23 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 Provenance = Literal[
     "measured",
     "literature-fit",
     "public-download",
+    "model-derived",
     "surrogate",
     "heuristic",
     "synthetic",
 ]
+
+RunMode = Literal[
+    "smoke",
+    "benchmark",
+    "research",
+]
+
+EXPLORATORY_PROVENANCES = {"surrogate", "heuristic", "synthetic"}
 
 
 class InputSource(BaseModel):
@@ -24,9 +32,11 @@ class InputSource(BaseModel):
     kind: Literal[
         "waveform",
         "cross_sections",
+        "collision_package",
         "magnetic_field",
         "reaction_set",
         "yield_model",
+        "dataset",
         "other",
     ] = "other"
     path: str | None = None
@@ -40,6 +50,8 @@ class CaseMetadata(BaseModel):
 
     benchmark: str | None = None
     material_system: str | None = None
+    benchmark_package: str | None = None
+    benchmark_version: str | None = None
     inputs: list[InputSource] = Field(default_factory=list)
     notes: str | None = None
 
@@ -58,4 +70,5 @@ class ValidationTarget(BaseModel):
 class ValidationConfig(BaseModel):
     """Collection of validation targets for a case."""
 
+    suite_name: str | None = None
     targets: list[ValidationTarget] = Field(default_factory=list)

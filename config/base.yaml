@@ -2,6 +2,8 @@
 
 name: "base"
 model: "global"
+mode: "benchmark"
+material_package: "data/material_packages/cu_ar_public_v1.yaml"
 
 geometry:
   r_target: 0.050        # 100 mm diameter target
@@ -34,7 +36,17 @@ numerics:
   dt_max: 1.0e-8
   rtol: 1.0e-6
   atol: 1.0e-10
+  current_atol: 1.0e-3
   solver: "BDF"
+
+circuit:
+  mode: "rl"
+  series_resistance_ohm: 6.0
+  series_inductance_h: 15.0e-6
+  plasma_resistance_floor_ohm: 0.5
+  plasma_resistance_ceiling_ohm: 500.0
+  electron_neutral_collision_hz: 4.0e7
+  electron_conductivity_scale: 1.0
 
 reactions_file: "data/reactions/gudmundsson_cu_ar.yaml"
 cross_sections_dir: "data/cross_sections"

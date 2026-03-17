@@ -2,6 +2,8 @@
 base: base.yaml
 
 name: "hipims_ti_ar"
+mode: "smoke"
+material_package: "data/material_packages/ti_ar_exploratory_v1.yaml"
 
 target:
   material: "Ti"

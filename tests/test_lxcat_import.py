@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from plasma.data.cross_sections import CrossSectionTable
 from plasma.data.lxcat_import import normalize_biagi_argon_archive
