@@ -580,9 +580,7 @@ class CompositeMCCHandler:
                     proc.cross_section.e_min, proc.cross_section.e_max,
                 )
                 rate = handler.background_density * sigma * v_mag
-                cumulative_prob = cumulative_prob + cp.where(
-                    total_upper > 0.0, rate / total_upper, 0.0,
-                )
+                cumulative_prob = cumulative_prob + rate / total_upper
                 this_collision = (~processed) & (rand_type < cumulative_prob)
                 collision_idx = cp.where(this_collision)[0]
                 if len(collision_idx) == 0:

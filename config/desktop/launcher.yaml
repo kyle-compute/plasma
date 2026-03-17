@@ -26,6 +26,10 @@ durations:
     title: "36 Min Test"
     n_steps: 20000
     est_wallclock: "~36 min"
+  - key: "test_1h"
+    title: "1 Hour Test"
+    n_steps: 35000
+    est_wallclock: "~1 h"
   - key: "overnight"
     title: "Overnight"
     n_steps: 100000
