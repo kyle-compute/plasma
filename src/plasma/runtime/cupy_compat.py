@@ -58,8 +58,16 @@ cp, CUPY_AVAILABLE = _load_cupy()
 
 if CUPY_AVAILABLE:
     from cupyx.scipy.sparse import csr_matrix as gpu_csr_matrix
+    from cupyx.scipy.sparse.linalg import cg as gpu_cg
     from cupyx.scipy.sparse.linalg import spsolve as gpu_spsolve
+
+    try:
+        from cupyx.scipy.sparse.linalg import LinearOperator as GpuLinearOperator
+    except ImportError:
+        from scipy.sparse.linalg import LinearOperator as GpuLinearOperator
 else:
     gpu_csr_matrix = scipy_csr_matrix
     gpu_spsolve = scipy_spsolve
+    from scipy.sparse.linalg import cg as gpu_cg
+    from scipy.sparse.linalg import LinearOperator as GpuLinearOperator
 

@@ -87,7 +87,7 @@ class PICDiagnostics:
         if phi.shape[1] > 2:
             Ez[:, 1:-1] = -(phi[:, 2:] - phi[:, :-2]) / (2.0 * grid.dz)
 
-        node_vol = cp.asarray(grid.node_volumes())
+        node_vol = grid.node_volumes_gpu()
         e_field = 0.5 * EPSILON_0 * float(cp.sum((Er**2 + Ez**2) * node_vol).item())
         self.field_energy.append(e_field)
 
@@ -125,25 +125,30 @@ def _merge_event_clouds(target: dict[str, dict[str, np.ndarray]], name: str, clo
 
 
 def _capture_boundary_incident_particles(particles: ParticleArray, *, z_plane: float) -> dict[str, np.ndarray] | None:
-    """Capture alive particles that have crossed the substrate boundary."""
+    """Capture alive particles that have crossed the substrate boundary.
+
+    GPU pre-filter: hit detection runs on device so only the compact
+    incident subset is transferred to CPU.
+    """
 
     n = particles.count
     if n == 0 or particles.species.charge_state <= 0:
         return None
 
-    z = cp.asnumpy(particles.z[:n])
-    alive = cp.asnumpy(particles.alive[:n])
-    mask = (alive == 1) & (z >= z_plane)
-    if not np.any(mask):
+    # GPU pre-filter — avoids transferring all z/alive arrays
+    mask_gpu = (particles.alive[:n] == 1) & (particles.z[:n] >= z_plane)
+    hit_idx = cp.where(mask_gpu)[0]
+    if len(hit_idx) == 0:
         return None
 
+    # Transfer only the compact incident subset
     return {
-        "r": cp.asnumpy(particles.r[:n][mask]),
-        "z": z[mask],
-        "vr": cp.asnumpy(particles.vr[:n][mask]),
-        "vz": cp.asnumpy(particles.vz[:n][mask]),
-        "vtheta": cp.asnumpy(particles.vtheta[:n][mask]),
-        "weight": cp.asnumpy(particles.weight[:n][mask]),
+        "r": cp.asnumpy(particles.r[:n][hit_idx]),
+        "z": cp.asnumpy(particles.z[:n][hit_idx]),
+        "vr": cp.asnumpy(particles.vr[:n][hit_idx]),
+        "vz": cp.asnumpy(particles.vz[:n][hit_idx]),
+        "vtheta": cp.asnumpy(particles.vtheta[:n][hit_idx]),
+        "weight": cp.asnumpy(particles.weight[:n][hit_idx]),
     }
 
 

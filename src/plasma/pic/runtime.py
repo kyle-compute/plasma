@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import queue
+import threading
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -73,6 +75,7 @@ def run_pic_case(
     metal_species_name = cfg.target.material
 
     substrate = SubstrateCollector(z_plane=cfg.geometry.z_substrate, dz_capture=cfg.geometry.z_substrate * 0.02)
+    hdf5_writer = _AsyncHDF5Writer()
     species_map = sim["species_map"]
     live_history: dict[str, list[float]] = {
         "time_s": [],
@@ -138,7 +141,8 @@ def run_pic_case(
                 species_name=species_name,
             )
         window_counts = event_counts(live_event_window)
-        provisional_snapshot = build_pic_live_snapshot(
+        # Build the snapshot ONCE (previously built twice per diag step)
+        snapshot = build_pic_live_snapshot(
             cfg.name,
             step=step,
             time_s=t,
@@ -164,8 +168,8 @@ def run_pic_case(
         live_history["substrate_hits_total"].append(float(substrate.total_count))
         live_history["electron_mean_energy_ev"].append(float(species_map["electron"].mean_energy_ev()))
         live_history["ar_ion_mean_energy_ev"].append(float(species_map["Ar+"].mean_energy_ev()))
-        live_history["field_max_v_m"].append(float(provisional_snapshot.metrics.get("max_e_field_v_m", 0.0)))
-        live_history["emissivity_total_arb"].append(float(provisional_snapshot.metrics.get("emissivity_total_arb", 0.0)))
+        live_history["field_max_v_m"].append(float(snapshot.metrics.get("max_e_field_v_m", 0.0)))
+        live_history["emissivity_total_arb"].append(float(snapshot.metrics.get("emissivity_total_arb", 0.0)))
         collision_counts = stats.get("collision_counts", {})
         live_history["collisions_per_sample"].append(float(sum(collision_counts.values())))
         live_history["excitation_collisions"].append(float(_sum_collision_family(collision_counts, "excitation")))
@@ -182,29 +186,14 @@ def run_pic_case(
             sputtered_events / target_impacts if target_impacts > 0.0 else 0.0
         )
         live_history["source_activity_total_arb"].append(
-            float(provisional_snapshot.metrics.get("source_activity_total_arb", 0.0))
+            float(snapshot.metrics.get("source_activity_total_arb", 0.0))
         )
         live_history["substrate_flux_total_arb"].append(
-            float(provisional_snapshot.metrics.get("substrate_flux_total_arb", 0.0))
+            float(snapshot.metrics.get("substrate_flux_total_arb", 0.0))
         )
         live_history["substrate_mean_energy_ev"].append(float(substrate.latest_mean_energy_ev()))
-        live_history["racetrack_peak_r_m"].append(float(provisional_snapshot.metrics.get("racetrack_peak_r_m", 0.0)))
+        live_history["racetrack_peak_r_m"].append(float(snapshot.metrics.get("racetrack_peak_r_m", 0.0)))
         if live_session is not None:
-            snapshot = build_pic_live_snapshot(
-                cfg.name,
-                step=step,
-                time_s=t,
-                grid=sim["grid"],
-                phi=_phi,
-                species_map=species_map,
-                history=live_history,
-                br_grid=sim["Br_grid"],
-                bz_grid=sim["Bz_grid"],
-                event_window=live_event_window,
-                geometry=live_geometry,
-                substrate=substrate,
-                max_particles=live_max_particles,
-            )
             live_session.publish(snapshot)
             _handle_live_commands(live_session, control_state)
         _save_hdf5_snapshot(
@@ -216,6 +205,7 @@ def run_pic_case(
             species_map,
             sim.get("background_state"),
             collision_counts,
+            async_writer=hdf5_writer,
         )
         clear_event_clouds(live_event_window)
 
@@ -241,6 +231,7 @@ def run_pic_case(
         checkpoint_metadata=checkpoint_metadata,
     )
     elapsed = time.time() - started
+    hdf5_writer.shutdown()
 
     collision_provenance = (
         "model-derived"
@@ -657,6 +648,67 @@ def _update_background_state(
                 handler.update_background_density(background_state[background_name])
 
 
+class _AsyncHDF5Writer:
+    """Background thread for non-blocking HDF5 snapshot writes."""
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue = queue.Queue(maxsize=4)
+        self._thread: threading.Thread | None = None
+
+    def _worker(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                break
+            try:
+                _do_save_hdf5_snapshot(**item)
+            except Exception:
+                pass
+            finally:
+                self._queue.task_done()
+
+    def submit(self, **kwargs) -> None:
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._worker, daemon=True)
+            self._thread.start()
+        try:
+            self._queue.put_nowait(kwargs)
+        except queue.Full:
+            pass  # drop snapshot rather than block the simulation
+
+    def shutdown(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            self._queue.put(None)
+            self._thread.join(timeout=10.0)
+
+
+def _do_save_hdf5_snapshot(
+    path,
+    step: int,
+    time_s: float,
+    phi_np,
+    n_e,
+    n_i,
+    background_state,
+    collision_counts,
+) -> None:
+    try:
+        from plasma.io.hdf5_diagnostics import save_diagnostics_snapshot
+    except ModuleNotFoundError:
+        return
+
+    save_diagnostics_snapshot(
+        path,
+        step=step,
+        time=time_s,
+        phi=phi_np,
+        n_e=n_e,
+        n_i=n_i,
+        background_state=background_state,
+        collision_counts=collision_counts,
+    )
+
+
 def _save_hdf5_snapshot(
     path: Path,
     step: int,
@@ -666,12 +718,9 @@ def _save_hdf5_snapshot(
     species_map: dict[str, ParticleArray],
     background_state: dict[str, float] | None,
     collision_counts: dict[str, int],
+    *,
+    async_writer: _AsyncHDF5Writer | None = None,
 ) -> None:
-    try:
-        from plasma.io.hdf5_diagnostics import save_diagnostics_snapshot
-    except ModuleNotFoundError:
-        return
-
     phi_np = cp.asnumpy(phi) if isinstance(phi, cp.ndarray) else phi
     electrons = species_map.get("electron")
     electron_density = number_density_view(grid, electrons) if electrons is not None else None
@@ -682,16 +731,21 @@ def _save_hdf5_snapshot(
         density = number_density_view(grid, particles)
         ion_density = density if ion_density is None else (ion_density + density)
 
-    save_diagnostics_snapshot(
-        path,
+    payload = dict(
+        path=path,
         step=step,
-        time=time_s,
-        phi=phi_np,
+        time_s=time_s,
+        phi_np=phi_np,
         n_e=electron_density,
         n_i=ion_density,
         background_state=background_state,
         collision_counts=collision_counts,
     )
+
+    if async_writer is not None:
+        async_writer.submit(**payload)
+    else:
+        _do_save_hdf5_snapshot(**payload)
 
 
 def _handle_live_commands(session: FileLiveSession, state: dict[str, int | bool]) -> None:
