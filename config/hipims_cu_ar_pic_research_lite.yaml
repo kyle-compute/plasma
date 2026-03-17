@@ -1,0 +1,52 @@
+# Research-lite HiPIMS case: 128x200 grid, ppc=32.
+# Designed to saturate an RTX 4080 and produce higher-fidelity data
+# than the monitor profile while staying in ~1 h wall-clock range.
+base: hipims_cu_ar_pic_public.yaml
+
+name: "hipims_cu_ar_pic_research_lite"
+mode: "smoke"
+
+grid:
+  nr: 128
+  nz: 200
+  permittivity_factor: 10.0
+
+particles:
+  ppc: 32
+  n0_electron: 1.0e+15
+  n0_ion: 1.0e+15
+  te_ev: 3.0
+  ti_ev: 0.1
+
+time:
+  dt: 5.0e-12
+  n_steps: 5000
+  diag_interval: 50
+  compact_interval: 250
+  checkpoint_interval: 0
+
+output:
+  dir: "output/pic/hipims_cu_ar_pic_research_lite"
+
+case:
+  benchmark: "Research-lite Cu/Ar HiPIMS (128x200, ppc=32)"
+  material_system: "Cu/Ar"
+  inputs:
+    - name: "gudmundsson_case1_waveform"
+      kind: "waveform"
+      path: "data/waveforms/cu_ar_case1_literature_fit.csv"
+      provenance: "literature-fit"
+      citation: "Literature-fit waveform derived from public Cu/Ar HiPIMS references."
+    - name: "biagi_e_ar_archive"
+      kind: "cross_sections"
+      path: "data/cross_sections/LXCat_Biagi_e_Ar.zip"
+      provenance: "public-download"
+      citation: "Biagi database, LXCat, retrieved March 16, 2026."
+    - name: "surrogate_magnetron_field"
+      kind: "magnetic_field"
+      path: "data/field_maps/hipims_cu_ar_pic_surrogate.npz"
+      provenance: "surrogate"
+      citation: "Field map generated from the analytic current-loop magnetron model."
+  notes: "Higher-fidelity desktop case (128x200, ppc=32) targeting 80%+ GPU utilization on RTX 4080-class hardware."
+
+validation: null

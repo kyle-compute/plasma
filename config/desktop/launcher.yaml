@@ -12,6 +12,10 @@ profiles:
     title: "Monitor"
     base_config: "../hipims_cu_ar_pic_monitor.yaml"
     notes: "Desktop monitor profile used for the 4080 workflow."
+  - key: "research_lite"
+    title: "Research Lite"
+    base_config: "../hipims_cu_ar_pic_research_lite.yaml"
+    notes: "128x200 grid, ppc=32. Higher fidelity for RTX 4080-class GPUs."
 
 durations:
   - key: "smoke"
