@@ -80,12 +80,25 @@ def electric_field_components(grid, phi) -> tuple[np.ndarray, np.ndarray, np.nda
     return er, ez, np.hypot(er, ez)
 
 
+_cached_bfield: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+
+
 def magnetic_field_magnitude(br_grid, bz_grid) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return magnetic field components and magnitude."""
+    """Return magnetic field components and magnitude.
+
+    Result is cached keyed on the id of the br_grid array since the
+    magnetic field is static throughout the simulation.
+    """
+    key = id(br_grid)
+    cached = _cached_bfield.get(key)
+    if cached is not None:
+        return cached
 
     br = np.asarray(cp.asnumpy(br_grid) if isinstance(br_grid, cp.ndarray) else br_grid, dtype=np.float64)
     bz = np.asarray(cp.asnumpy(bz_grid) if isinstance(bz_grid, cp.ndarray) else bz_grid, dtype=np.float64)
-    return br, bz, np.hypot(br, bz)
+    result = (br, bz, np.hypot(br, bz))
+    _cached_bfield[key] = result
+    return result
 
 
 def event_map(grid, window: EventWindow | None, names: tuple[str, ...]) -> np.ndarray:

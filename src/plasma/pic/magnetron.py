@@ -308,8 +308,13 @@ def apply_magnetron_boundaries(
     if n == 0:
         return 0, cp.zeros(0, dtype=cp.int32)
 
-    n_alive_before = particles.n_alive
     hit_flags = cp.zeros(n, dtype=cp.int32)
+
+    # Snapshot alive count cheaply from the alive array before the kernel
+    # mutates it.  cp.count_nonzero is cheaper than the old n_alive property
+    # for large arrays, but the real win is that the caller (loop.py) ignores
+    # the return value, so this is only needed for the test-facing API.
+    alive_before = int(cp.count_nonzero(particles.alive[:n]).item())
 
     threads_per_block = 256
     blocks = (n + threads_per_block - 1) // threads_per_block
@@ -324,8 +329,8 @@ def apply_magnetron_boundaries(
         n,
     )
 
-    n_alive_after = particles.n_alive
-    return n_alive_before - n_alive_after, hit_flags
+    alive_after = int(cp.count_nonzero(particles.alive[:n]).item())
+    return alive_before - alive_after, hit_flags
 
 
 @dataclass

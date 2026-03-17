@@ -138,24 +138,25 @@ class ParticleArray:
     def compact(self) -> None:
         """Remove dead particles by compacting arrays.
 
-        Uses stream compaction: gather alive particles to front of arrays.
-        This should be called periodically (not every timestep) to reclaim
-        memory from absorbed particles.
+        Uses stream compaction via index gather: alive particles are moved
+        to the front of arrays.  This should be called periodically (not
+        every timestep) to reclaim memory from absorbed particles.
         """
         if self.count == 0:
             return
 
-        mask = self.alive[: self.count] == 1
-        n_alive = int(cp.sum(mask).item())
+        # Index-based gather is faster than boolean fancy indexing on GPU
+        idx = cp.where(self.alive[: self.count] == 1)[0]
+        n_alive = idx.shape[0]
 
         if n_alive == self.count:
             return  # Nothing to compact
 
         for attr in ("r", "z", "vr", "vz", "vtheta", "weight"):
             arr = getattr(self, attr)
-            arr[:n_alive] = arr[: self.count][mask]
+            arr[:n_alive] = arr[idx]
 
-        self.alive[:n_alive] = 1
+        # Compacted particles already have alive=1; just clear the tail
         self.alive[n_alive : self.count] = 0
         self.count = n_alive
 
