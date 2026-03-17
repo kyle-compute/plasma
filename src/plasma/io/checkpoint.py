@@ -95,7 +95,7 @@ def save_checkpoint(
             sp_grp.attrs["charge"] = particles.species.charge
             sp_grp.attrs["mass"] = particles.species.mass
             sp_grp.attrs["charge_state"] = particles.species.charge_state
-            sp_grp.attrs["n_alive"] = particles.n_alive
+            sp_grp.attrs["n_alive"] = particles.count  # compact() already ran
 
 
 def load_checkpoint(path: str | Path) -> dict:

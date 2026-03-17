@@ -30,6 +30,7 @@ class SubstrateCollector:
     _step_mean_energy_ev: list[float] = field(default_factory=list)
     _step_weight_sum: list[float] = field(default_factory=list)
     _step_energy_weighted_sum: list[float] = field(default_factory=list)
+    _total_count: int = 0
     _counts_by_species: dict[str, int] = field(default_factory=dict)
     _energy_ev_by_species: dict[str, list[NDArray]] = field(default_factory=dict)
     _weight_by_species: dict[str, list[NDArray]] = field(default_factory=dict)
@@ -39,23 +40,28 @@ class SubstrateCollector:
         """Record ions near the substrate plane.
 
         Returns count of ions captured this step.
+
+        GPU pre-filter: hit detection runs on device so only the compact
+        captured subset is transferred to CPU.
         """
         n = particles.count
         if n == 0:
             self._append_step_stats(t=t, count=0, weight_sum=0.0, energy_weighted_sum=0.0)
             return 0
 
-        z = cp.asnumpy(particles.z[:n])
-        alive = cp.asnumpy(particles.alive[:n])
-        mask = (alive == 1) & (np.abs(z - self.z_plane) < self.dz_capture)
-        count = int(np.sum(mask))
+        # GPU pre-filter — avoids transferring full z/alive arrays
+        z_gpu = particles.z[:n]
+        mask_gpu = (particles.alive[:n] == 1) & (cp.abs(z_gpu - self.z_plane) < self.dz_capture)
+        hit_idx = cp.where(mask_gpu)[0]
+        count = int(hit_idx.shape[0])
 
         if count > 0:
-            r = cp.asnumpy(particles.r[:n][mask])
-            vr = cp.asnumpy(particles.vr[:n][mask])
-            vz = cp.asnumpy(particles.vz[:n][mask])
-            vt = cp.asnumpy(particles.vtheta[:n][mask])
-            w = cp.asnumpy(particles.weight[:n][mask])
+            # Transfer only the compact subset
+            r = cp.asnumpy(particles.r[:n][hit_idx])
+            vr = cp.asnumpy(particles.vr[:n][hit_idx])
+            vz = cp.asnumpy(particles.vz[:n][hit_idx])
+            vt = cp.asnumpy(particles.vtheta[:n][hit_idx])
+            w = cp.asnumpy(particles.weight[:n][hit_idx])
 
             v2 = vr**2 + vz**2 + vt**2
             ke_ev = 0.5 * particles.species.mass * v2 / E_CHARGE
@@ -85,24 +91,42 @@ class SubstrateCollector:
         `record_absorbed`, which samples a capture band near the substrate plane,
         this method records particles whose positions have crossed the substrate
         boundary and are about to be absorbed by the boundary condition.
+
+        GPU pre-filter: hit detection runs on device so only the compact
+        incident subset is transferred to CPU.
         """
 
         n = particles.count
         if n == 0:
-            self._counts.append(0)
-            self._times.append(t)
-            self._step_mean_energy_ev.append(0.0)
+            self._append_step_stats(t=t, count=0, weight_sum=0.0, energy_weighted_sum=0.0)
             return 0
 
-        z = cp.asnumpy(particles.z[:n])
-        alive = cp.asnumpy(particles.alive[:n])
-        mask = (alive == 1) & (z >= self.z_plane)
-        return self._record_masked_particles(
-            particles,
-            mask=mask,
+        # GPU pre-filter — avoids transferring full z/alive arrays
+        mask_gpu = (particles.alive[:n] == 1) & (particles.z[:n] >= self.z_plane)
+        hit_idx = cp.where(mask_gpu)[0]
+        count = int(hit_idx.shape[0])
+
+        if count == 0:
+            self._append_step_stats(t=t, count=0, weight_sum=0.0, energy_weighted_sum=0.0)
+            return 0
+
+        # Transfer only the compact hit subset to CPU
+        r = cp.asnumpy(particles.r[:n][hit_idx])
+        vr = cp.asnumpy(particles.vr[:n][hit_idx])
+        vz = cp.asnumpy(particles.vz[:n][hit_idx])
+        vt = cp.asnumpy(particles.vtheta[:n][hit_idx])
+        w = cp.asnumpy(particles.weight[:n][hit_idx])
+
+        v2 = vr**2 + vz**2 + vt**2
+        ke_ev = 0.5 * particles.species.mass * v2 / E_CHARGE
+        self._append_capture(
+            r=r,
+            energy_ev=ke_ev,
+            weight=w,
             t=t,
             species_name=species_name or particles.species.name,
         )
+        return count
 
     def record_particle_data(
         self,
@@ -159,7 +183,7 @@ class SubstrateCollector:
 
     @property
     def total_count(self) -> int:
-        return sum(self._counts)
+        return self._total_count
 
     def latest_count(self) -> int:
         """Latest recorded arrival count."""
@@ -292,6 +316,7 @@ class SubstrateCollector:
         weight_sum: float,
         energy_weighted_sum: float,
     ) -> None:
+        self._total_count += int(count)
         if self._times and self._times[-1] == t:
             self._counts[-1] += int(count)
             self._step_weight_sum[-1] += float(weight_sum)

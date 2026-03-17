@@ -134,6 +134,8 @@ def build_pic_live_snapshot(
     max_particles: int = 1200,
     state: str = "running",
     message: str | None = None,
+    precomputed_electron_density: np.ndarray | None = None,
+    precomputed_ion_density: np.ndarray | None = None,
 ) -> LiveSnapshot:
     """Build a live snapshot from the current PIC state."""
 
@@ -143,17 +145,19 @@ def build_pic_live_snapshot(
     }
 
     electrons = species_map.get("electron")
-    electron_density = None
-    if electrons is not None:
+    electron_density = precomputed_electron_density
+    if electron_density is None and electrons is not None:
         electron_density = number_density_view(grid, electrons)
+    if electron_density is not None:
         fields["electron_density_m3"] = field_bundle(
             electron_density, x=grid.z_edges, y=grid.r_edges, unit="m^-3", label="Electron density"
         )
 
     ions = species_map.get("Ar+")
-    ion_density = None
-    if ions is not None:
+    ion_density = precomputed_ion_density
+    if ion_density is None and ions is not None:
         ion_density = number_density_view(grid, ions)
+    if ion_density is not None:
         fields["ion_density_m3"] = field_bundle(
             ion_density, x=grid.z_edges, y=grid.r_edges, unit="m^-3", label="Ar+ density"
         )

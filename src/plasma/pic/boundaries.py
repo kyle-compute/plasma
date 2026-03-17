@@ -51,21 +51,16 @@ def apply_boundaries_kernel(
         vtheta[idx] = -vtheta[idx]
 
 
-def apply_boundaries(grid, particles) -> int:
+def apply_boundaries(grid, particles) -> None:
     """Apply boundary conditions to particles.
 
     Args:
         grid: CylindricalGrid.
         particles: ParticleArray to modify in-place.
-
-    Returns:
-        Number of particles absorbed.
     """
     n = particles.count
     if n == 0:
-        return 0
-
-    n_alive_before = particles.n_alive
+        return
 
     threads_per_block = 256
     blocks = (n + threads_per_block - 1) // threads_per_block
@@ -77,9 +72,6 @@ def apply_boundaries(grid, particles) -> int:
         grid.r_max, grid.z_max,
         n,
     )
-
-    n_alive_after = particles.n_alive
-    return n_alive_before - n_alive_after
 
 
 @cuda.jit

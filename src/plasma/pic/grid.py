@@ -138,6 +138,14 @@ class CylindricalGrid:
             self._node_volumes_gpu_cache = cp.asarray(self.node_volumes())
         return self._node_volumes_gpu_cache
 
+    def node_volumes_gpu_safe(self):
+        """Return node volumes clamped to avoid division by zero, cached on GPU."""
+        from plasma.runtime.cupy_compat import cp
+
+        if not hasattr(self, "_node_volumes_gpu_safe_cache"):
+            self._node_volumes_gpu_safe_cache = cp.maximum(self.node_volumes_gpu(), 1e-30)
+        return self._node_volumes_gpu_safe_cache
+
     def debye_length(self, n_e: float, te_ev: float) -> float:
         """Electron Debye length [m].
 

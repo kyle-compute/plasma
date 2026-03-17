@@ -141,6 +141,16 @@ def run_pic_case(
                 species_name=species_name,
             )
         window_counts = event_counts(live_event_window)
+        # Pre-compute densities once — shared by snapshot builder and HDF5 writer
+        _electrons = species_map.get("electron")
+        _precomp_electron_density = number_density_view(sim["grid"], _electrons) if _electrons is not None else None
+        _precomp_ion_density = None
+        for _sp in species_map.values():
+            if _sp.species.charge_state <= 0:
+                continue
+            _d = number_density_view(sim["grid"], _sp)
+            _precomp_ion_density = _d if _precomp_ion_density is None else (_precomp_ion_density + _d)
+
         # Build the snapshot ONCE (previously built twice per diag step)
         snapshot = build_pic_live_snapshot(
             cfg.name,
@@ -156,6 +166,8 @@ def run_pic_case(
             geometry=live_geometry,
             substrate=substrate,
             max_particles=live_max_particles,
+            precomputed_electron_density=_precomp_electron_density,
+            precomputed_ion_density=_precomp_ion_density,
         )
         live_history["time_s"].append(float(t))
         live_history["target_voltage_v"].append(float(sim["waveform"].V(t)))
@@ -206,6 +218,8 @@ def run_pic_case(
             sim.get("background_state"),
             collision_counts,
             async_writer=hdf5_writer,
+            electron_density=_precomp_electron_density,
+            ion_density=_precomp_ion_density,
         )
         clear_event_clouds(live_event_window)
 
@@ -720,16 +734,21 @@ def _save_hdf5_snapshot(
     collision_counts: dict[str, int],
     *,
     async_writer: _AsyncHDF5Writer | None = None,
+    electron_density: np.ndarray | None = None,
+    ion_density: np.ndarray | None = None,
 ) -> None:
     phi_np = cp.asnumpy(phi) if isinstance(phi, cp.ndarray) else phi
-    electrons = species_map.get("electron")
-    electron_density = number_density_view(grid, electrons) if electrons is not None else None
-    ion_density = None
-    for particles in species_map.values():
-        if particles.species.charge_state <= 0:
-            continue
-        density = number_density_view(grid, particles)
-        ion_density = density if ion_density is None else (ion_density + density)
+
+    # Use pre-computed densities if provided; otherwise compute here
+    if electron_density is None:
+        electrons = species_map.get("electron")
+        electron_density = number_density_view(grid, electrons) if electrons is not None else None
+    if ion_density is None:
+        for particles in species_map.values():
+            if particles.species.charge_state <= 0:
+                continue
+            density = number_density_view(grid, particles)
+            ion_density = density if ion_density is None else (ion_density + density)
 
     payload = dict(
         path=path,
