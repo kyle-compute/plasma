@@ -1,37 +1,36 @@
 # Plasma Sputtering Simulator
 
-GPU-accelerated plasma simulation for **High Power Impulse Magnetron Sputtering (HiPIMS)**, targeting thin-film deposition process understanding and optimization.
+A GPU-accelerated HiPIMS (High Power Impulse Magnetron Sputtering) plasma simulation. Built as a learning project and engineering baseline — not a validated research tool. The full PIC-MCC pipeline runs end-to-end on an NVIDIA GPU, but the collision cross-sections are synthetic approximations and the simulation hasn't been benchmarked against published experimental data yet.
 
-## What It Does
+If you're looking for a starting point to build a real HiPIMS simulator on top of, this might be useful. If you need production-grade plasma modeling, look at VSIM, WARP, or PICCOLO.
 
-Two complementary simulation fidelities for HiPIMS discharges:
+## What's here
 
-- **0D Global Model (IRM)** — Volume-averaged ODE system tracking species densities and electron temperature. Runs in seconds. Based on the Gudmundsson 2022 ionization region model for Cu/Ar.
+**0D Global Model (IRM)** — Volume-averaged rate equations for species densities and electron temperature in the ionization region. Uses Cu/Ar reaction rate fits from Gudmundsson 2022 (real literature data). Runs in seconds. This is the more trustworthy part of the code.
 
-- **2D Axisymmetric PIC-MCC** — Fully kinetic Particle-in-Cell with Monte Carlo Collisions in cylindrical (r, z) geometry. Self-consistent electric fields via Poisson solver, prescribed static magnetic field from magnetron geometry. Runs on NVIDIA GPU via CuPy/Numba CUDA.
+**2D Axisymmetric PIC-MCC** — Particle-in-Cell with Monte Carlo Collisions in cylindrical (r, z) geometry. Boris pusher, sparse Poisson solver, null-collision MCC, magnetron boundaries with sputtering and SEE. The numerical machinery works, but the physics inputs (cross-sections) are synthetic stand-ins, not measured data.
 
-## Features
+## What works
 
-- Full Cu/Ar reaction set (27 reactions from Gudmundsson 2022)
-- Boris pusher with exact magnetic rotation
-- Sparse finite-difference Poisson solver on GPU (`cupyx.scipy.sparse.linalg.spsolve`)
-- Null-collision Monte Carlo for electron-neutral and ion-neutral interactions
-- Yamamura sputtering yield model with cosine angular emission
-- Magnetron geometry with secondary electron emission
-- Pydantic-validated configuration via YAML files
-- HDF5 checkpoint/restart support
-- Real-time viewer (PySide6/pyqtgraph) for live monitoring of PIC runs
-- Docker support with NVIDIA GPU passthrough
+- Full PIC loop: deposit → Poisson solve → gather → Boris push → boundaries → MCC → diagnostics
+- Checkpoint/restart via HDF5 (can survive long runs)
+- IEDF and EEDF extraction, spatial density/temperature profiles
+- Real-time viewer for watching PIC runs live (PySide6/pyqtgraph)
+- 0D model with literature-sourced Cu/Ar rate coefficients (27 reactions)
+- Docker container with GPU passthrough
 
-## Quick Start
+## What doesn't work (yet)
 
-### Requirements
+- **Cross-sections are synthetic.** The e-Ar and e-Cu collision cross-sections are analytical approximations, not real LXCat/Phelps data. The plumbing to load real data exists, the data hasn't been plugged in.
+- **No multi-GPU.** Single GPU only, no domain decomposition. Each GPU runs an independent simulation.
+- **Poisson solver won't scale.** Uses sparse direct LU — fine for the current 60x100 grid, will choke on anything above ~150x150. Needs a multigrid or iterative solver for larger domains.
+- **Simplified surface physics.** SEE yield is constant (not energy/angle-dependent). Sputtering yield is energy-only (no incidence angle dependence).
+- **Not validated.** No benchmark reproduction (Landau damping, Gudmundsson figures, experimental IEDFs). The test suite covers module-level correctness, not physics accuracy.
+- **Permittivity inflation.** Uses kappa=10 to relax Debye length constraints, which distorts sheath structure.
 
-- Python >= 3.11
-- NVIDIA GPU with CUDA 12.x
-- [uv](https://github.com/astral-sh/uv) (recommended) or pip
+## Quick start
 
-### Install
+Requires Python >= 3.11 and an NVIDIA GPU with CUDA 12.x.
 
 ```bash
 git clone https://github.com/kyle-compute/plasma.git
@@ -39,72 +38,57 @@ cd plasma
 uv venv && uv pip install -e ".[dev]"
 ```
 
-### Run the 0D Global Model
-
+Run the 0D model:
 ```bash
 python scripts/run_global_model.py --config config/hipims_cu_ar.yaml
 ```
 
-### Run PIC Simulation
-
+Run PIC:
 ```bash
 plasma-tools pic --config config/hipims_cu_ar_pic.yaml
 ```
 
-### Docker
-
+Docker:
 ```bash
-docker compose up --build
+docker compose up --build   # needs NVIDIA Container Toolkit
 ```
 
-Requires [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for GPU passthrough.
-
-## Project Structure
-
-```
-plasma/
-├── config/                 # YAML configuration files
-├── data/
-│   ├── reactions/          # Rate coefficient fits (Gudmundsson 2022)
-│   ├── sputtering/         # Yamamura yield parameters
-│   ├── cross_sections/     # LXCat cross-section data
-│   ├── collision_packages/ # Bundled collision data packages
-│   └── material_packages/  # Material property packages
-├── src/plasma/
-│   ├── core/               # Constants, config, species definitions
-│   ├── data/               # Cross-sections, reactions, sputtering models
-│   ├── global_model/       # 0D IRM (rate equations, power balance, transport)
-│   ├── pic/                # 2D PIC-MCC (Boris, Poisson, MCC, magnetron)
-│   ├── diagnostics/        # IEDF, spatial profiles, distribution functions
-│   ├── io/                 # HDF5 checkpointing
-│   ├── live/               # Real-time data publishing for viewer
-│   ├── viewer/             # PySide6 live monitoring application
-│   └── ml/                 # ML surrogate models (experimental)
-├── tests/                  # pytest suite
-├── scripts/                # CLI entry points
-├── Dockerfile              # GPU-enabled container
-└── docker-compose.yml
-```
-
-## Configuration
-
-All simulation parameters are defined in YAML config files. See `config/base.yaml` for defaults and `config/hipims_cu_ar.yaml` for a complete Cu/Ar example.
-
-Key parameters:
-- Discharge voltage, pressure, pulse timing
-- Target material (Cu, Ti) and gas (Ar)
-- Grid resolution, timestep, particle count
-- Diagnostics intervals and output paths
-
-## Tests
-
+Tests:
 ```bash
 pytest
 ```
 
-The test suite covers cross-section interpolation, rate coefficients, sputtering yields, Boris conservation, Poisson solver (method of manufactured solutions), charge deposition, MCC collision rates, and magnetron geometry.
+## Project structure
 
-## Physics References
+```
+plasma/
+├── config/                 # YAML configs (discharge params, grid, timing)
+├── data/
+│   ├── reactions/          # Rate coefficient fits from Gudmundsson 2022
+│   ├── sputtering/         # Yamamura yield parameters
+│   ├── collision_packages/ # Bundled collision data (synthetic)
+│   └── material_packages/  # Material property packages
+├── src/plasma/
+│   ├── core/               # Constants, config, species
+│   ├── data/               # Cross-sections, reactions, sputtering
+│   ├── global_model/       # 0D IRM
+│   ├── pic/                # 2D PIC-MCC (Boris, Poisson, MCC, magnetron)
+│   ├── diagnostics/        # IEDF, EEDF, spatial profiles
+│   ├── io/                 # HDF5 checkpointing
+│   ├── viewer/             # Live PIC monitoring (PySide6)
+│   └── ml/                 # ML surrogate models (experimental)
+├── tests/                  # pytest suite
+├── Dockerfile
+└── docker-compose.yml
+```
+
+## If you want to make this useful
+
+The single highest-impact improvement is replacing the synthetic cross-sections with real data. Download e-Ar cross-sections from [LXCat](https://lxcat.net/) (Biagi or Phelps sets), format them as two-column TSV, and point the collision package config at them. The `CollisionPackage` loader and `lxcat_import` module already handle the rest.
+
+After that: bump the grid to 128x200+, increase run duration to cover a full HiPIMS pulse (~100 µs), and run a Landau damping benchmark to verify the PIC machinery independently of the collision physics.
+
+## References
 
 - Gudmundsson, J.T. et al. "Ionization region model of high power impulse magnetron sputtering of copper." *Surf. Coat. Technol.* 442 (2022) 128189.
 - Brenning, N. et al. "HiPIMS optimization by using mixed high-power and low-power pulsing." *Plasma Sources Sci. Technol.* 30 (2021) 015015.
